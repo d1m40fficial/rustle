@@ -22,35 +22,25 @@
 | Компонент | Статус | Комментарий |
 |---|---|---|
 | Windows | Windows 11 IoT Enterprise LTSC, 26100 | x64 |
-| WebView2 Runtime | установлен, 156.0.4314.58 | можно разрабатывать |
-| Git | 2.55 | установлен; глобальный user.name/email не задан |
+| WebView2 Runtime | установлен, 156.0.4314.58 | используется |
+| Rust | 1.99.1, host [[BT]]x86_64-pc-windows-gnu[[BT]] | установлен через Scoop ([[BT]]rustup-gnu[[BT]]) |
+| MinGW-w64 | 16.2.0 | установлен через Scoop |
+| Visual Studio 2026 | без C++ workload | не требуется для GNU-сборки; MSVC остаётся опцией |
+| GitHub CLI | 2.103.3 | авторизован как [[BT]]d1m40fficial[[BT]], scopes: repo, workflow |
+| Git | 2.55 | установлен |
 | Node.js | 24.19.0 | есть; для сборки не обязателен |
-| Visual Studio 2026 Community | установлен | **нет C++ workload и Windows SDK** |
-| Rust / Cargo / rustup | **не установлены** | нужен rustup + MSVC target |
-| GitHub CLI | **не установлен** | в Credential Manager есть записи `gh:github.com:d1m40fficial` |
-| Права администратора | нет | установка C++ workload потребует UAC |
-| Свободно на C: | ~142 ГБ | достаточно |
+| Репозиторий | github.com/d1m40fficial/rustle | публичный, создан |
+| Права администратора | не требуются | всё установлено в пользовательский профиль |
 
-### 2.1 Что нужно установить
+### 2.1 Как воспроизвести окружение
 
-1. **Visual Studio C++ workload + Windows SDK** (нужны права администратора, ставится 20–40 минут):
-   ```powershell
-   & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\setup.exe" modify --installPath "C:\Program Files\Microsoft Visual Studio\18\Community" --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --passive
-   ```
-   Проще всего: Visual Studio Installer → Modify → «Разработка классических приложений на C++» → установить. Без этого MSVC-сборка Rust не слинкуется.
-2. **Rust stable (MSVC)** — без администратора:
-   ```powershell
-   Invoke-WebRequest https://win.rustup.rs/x86_64 -OutFile "$env:TEMP\rustup-init.exe"
-   & "$env:TEMP\rustup-init.exe" -y --default-toolchain stable-x86_64-pc-windows-msvc
-   ```
-3. **GitHub CLI** (portable ZIP) — для создания репозитория и релизов. Можно заменить веб-интерфейсом GitHub и Git Credential Manager.
-4. **Git identity** (локально в репозитории):
-   ```powershell
-   git config user.name "d1m40fficial"
-   git config user.email "d1m40fficial@users.noreply.github.com"
-   ```
+[[BT]][[BT]][[BT]]powershell
+scoop install rustup-gnu mingw gh
+[[BT]][[BT]][[BT]]
 
----
+Scoop прописывает PATH и [[BT]]CARGO_HOME[[BT]]/[[BT]]RUSTUP_HOME[[BT]] в пользовательские переменные;
+после установки нужен новый терминал. Для GNU-сборки обязателен [[BT]]WebView2Loader.dll[[BT]];
+он вендорен в [[BT]]assets/webview2/x64[[BT]] и копируется build.rs рядом с exe.
 
 ## 3. Этапы
 
@@ -60,15 +50,17 @@
 
 Задачи:
 
-- [ ] Установить Rust + MSVC, собрать пример wry.
-- [ ] Создать репозиторий на GitHub, защитить `main`, добавить шаблоны, лицензию, README, ТЗ.
-- [ ] Создать cargo workspace: `rustle-app`, `rustle-core`, `rustle-engine`, `rustle-storage`, `rustle-platform`, `rustle-ui`.
-- [ ] Минимальное окно 1200×800 с chrome WebView (заглушка) и одной контентной вкладкой (about:blank).
-- [ ] Трассировка старта: метки процесса, окна, chrome ready, первой вкладки.
-- [ ] Логирование и паника.
-- [ ] CI: fmt, clippy, test, release build; артефакт Windows ZIP.
-- [ ] Спайк движка (см. матрицу ниже) и документ `docs/spikes/engine-capabilities.md`.
-- [ ] ADR-0001 (движок), ADR-0002 (UI-оболочка), ADR-0003 (перекрытия/popup).
+- [x] Установить Rust GNU + MinGW через Scoop, собрать пример wry.
+- [x] Создать публичный репозиторий, лицензию, README, ТЗ. Защита [[BT]]main[[BT]] и шаблоны — после стабилизации CI.
+- [x] Создать cargo workspace: [[BT]]rustle-app[[BT]], [[BT]]rustle-core[[BT]], [[BT]]rustle-engine[[BT]], [[BT]]rustle-storage[[BT]], [[BT]]rustle-platform[[BT]], [[BT]]rustle-ui[[BT]].
+- [x] Окно 1280×800: chrome WebView, content WebView, custom protocol, IPC.
+- [x] Трассировка старта: метки процесса, окна, content, chrome, chrome-ready.
+- [ ] Логирование через tracing и panic hook (сейчас простые startup-метки).
+- [x] CI workflow: fmt, clippy, test, release build (проверить зелёный после push).
+- [x] Спайк движка и документ [[BT]]docs/spikes/engine-capabilities.md[[BT]].
+- [x] ADR-0001 (движок), ADR-0002 (HTML-оболочка), ADR-0003 (GNU/WebView2Loader).
+- [x] Вендоринг [[BT]]WebView2Loader.dll[[BT]] и копирование build.rs.
+- [x] Ctrl+L через AcceleratorKeyPressed; z-order chrome поверх контента проверен.
 
 Матрица спайка (каждый пункт: работает / работает с хаком / не работает):
 
@@ -91,6 +83,23 @@
 | Очистка cookies/кэша | API профиля | удаление каталога |
 | PDF и YouTube | smoke | — |
 | Память базовой линии | 1 пустая вкладка | — |
+
+### Фактические метрики M0 (debug, 2026-11-06)
+
+| Метрика | Значение |
+|---|---|
+| Старт процесса → окно | 10–12 мс |
+| Окно → content WebView | 152–159 мс |
+| Content → chrome WebView | 198–204 мс |
+| Chrome-ready (IPC) | 214–252 мс (debug), 211 мс (release) |
+| Память, newtab, debug (private / WorkingSet) | 186.4 / 402.2 МБ, 9 процессов |
+| Память, newtab, release (private / WorkingSet) | 172.0 / 377.7 МБ, 9 процессов |
+| Память, example.com, debug (private / WorkingSet) | 190.0 / 424.9 МБ, 9 процессов |
+| Ctrl+L из контента | работает, фокус в адресной строке, навигация подтверждена |
+| Z-order chrome поверх content | работает при создании content → chrome |
+
+Цель по памяти 250 МБ для одной вкладки при двух WebView не достигается; см.
+[[BT]]docs/spikes/engine-capabilities.md[[BT]]. Решение по бюджету — после release-замера.
 
 **Решение G0.** Если критичные пункты (z-order, клавиатура, custom protocol, multi-webview) не решаются на wry, выбираем: патч wry / собственный хост на webview2-com (Windows) / CEF. До прохождения G0 не начинаем M1.
 
