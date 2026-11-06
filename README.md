@@ -7,15 +7,15 @@
 > Статус: **0.1.0 — первый публичный релиз**. Браузер, вкладки, история, закладки,
 > загрузки, темы, приватное окно и установщик готовы.
 
-![Rustle M4](docs/assets/m31.png)
+![Rustle 0.1.0](docs/assets/m5.png)
 
 ## Установка
 
-- **Установщик** — `dist/Rustle-0.1.0-setup.exe`, per-user, без прав администратора.
-- **Portable** — `dist/Rustle-0.1.0-portable.zip`: распакуйте и запустите `rustle.exe`.
+- **Установщик** — [Rustle-0.1.0-setup.exe](https://github.com/d1m40fficial/rustle/releases/download/v0.1.0/Rustle-0.1.0-setup.exe), per-user, без прав администратора.
+- **Portable** — [Rustle-0.1.0-portable.zip](https://github.com/d1m40fficial/rustle/releases/download/v0.1.0/Rustle-0.1.0-portable.zip): распакуйте и запустите `rustle.exe`.
 - Требуется Windows 10/11 x64 и Microsoft Edge WebView2 Runtime.
 
-SHA256 — в `dist/SHA256SUMS.txt`. История изменений — [CHANGELOG.md](CHANGELOG.md).
+SHA256 — [SHA256SUMS.txt](https://github.com/d1m40fficial/rustle/releases/download/v0.1.0/SHA256SUMS.txt). История изменений — [CHANGELOG.md](CHANGELOG.md).
 
 ## Документы
 
@@ -25,6 +25,7 @@ SHA256 — в `dist/SHA256SUMS.txt`. История изменений — [CHAN
 - [Производительность](docs/perf.md) — старт, память, размер.
 - [ADR](docs/adr) — принятые архитектурные решения.
 - [Release notes 0.1.0](docs/release-0.1.0.md).
+- [QA 0.1.0](docs/qa-0.1.0.md).
 
 ## Что это
 
