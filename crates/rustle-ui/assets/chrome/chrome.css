@@ -1013,3 +1013,58 @@ html[data-theme="light"] .suggestions {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+
+html.private-mode .build-badge {
+  border-color: var(--danger);
+  color: var(--danger);
+  letter-spacing: 0.06em;
+}
+
+.address__icon--insecure {
+  color: var(--danger);
+}
+
+.find-bar {
+  position: absolute;
+  top: var(--chrome-offset, 78px);
+  right: 12px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 38px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.find-bar[hidden] {
+  display: none;
+}
+
+.find-bar__input {
+  width: 220px;
+  height: 28px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+
+.find-bar__button {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.find-bar__button:hover {
+  background: var(--bg-hover);
+}

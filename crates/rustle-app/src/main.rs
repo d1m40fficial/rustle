@@ -24,7 +24,7 @@ use tao::{
     dpi::LogicalSize as TaoLogicalSize,
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
-    window::{Window, WindowBuilder},
+    window::{Fullscreen, Window, WindowBuilder},
 };
 use url::Url;
 use wry::{
@@ -93,6 +93,7 @@ struct Tab {
     nav_id: u64,
     return_url: Option<String>,
     favicon: Option<String>,
+    zoom: f64,
 }
 
 impl Tab {
@@ -109,6 +110,7 @@ impl Tab {
             nav_id: 0,
             return_url: None,
             favicon: None,
+            zoom: 1.0,
         }
     }
 }
@@ -149,8 +151,10 @@ struct AppState {
     dropdown_open: bool,
     dropdown_height: u32,
     bookmark_bar: bool,
+    find_open: bool,
     downloads: Vec<DownloadEntry>,
     next_download_id: u64,
+    private: bool,
 }
 
 impl AppState {
@@ -180,8 +184,10 @@ impl AppState {
             dropdown_open: false,
             dropdown_height: 360,
             bookmark_bar: false,
+            find_open: false,
             downloads: Vec::new(),
             next_download_id: 1,
+            private: false,
         }
     }
 
@@ -363,6 +369,9 @@ fn push_tab(state: &mut AppState, url: String, title: String) -> TabId {
 }
 
 fn save_session_state(state: &Rc<RefCell<AppState>>, clean_exit: bool) {
+    if state.borrow().private {
+        return;
+    }
     let session = {
         let state = state.borrow();
         let active = state.tab_index(state.active).unwrap_or(0);
@@ -517,6 +526,8 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
             "mode": mode,
             "internalPage": internal_page_name,
             "theme": if state.settings.theme == "light" { "light" } else { "dark" },
+            "private": state.private,
+            "secure": url.starts_with("https://"),
             "settings": {
                 "searchEngine": state.settings.search_engine,
                 "theme": state.settings.theme,
@@ -526,7 +537,13 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
         });
 
         let window_title = if title == "Новая вкладка" || title == "Rustle" {
-            "Rustle".to_owned()
+            if state.private {
+                "Rustle — приватное окно".to_owned()
+            } else {
+                "Rustle".to_owned()
+            }
+        } else if state.private {
+            format!("{title} — Rustle (приватно)")
         } else {
             format!("{title} — Rustle")
         };
@@ -664,6 +681,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             state.bookmark_bar,
         )
     };
+    let find_open = state.borrow().find_open;
 
     let collapsed = if bookmark_bar {
         CHROME_COLLAPSED + 30
@@ -674,6 +692,8 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
         height
     } else if dropdown_open {
         (dropdown_height + collapsed.saturating_sub(CHROME_COLLAPSED)).clamp(collapsed, height)
+    } else if find_open {
+        (collapsed + 44).min(height)
     } else {
         collapsed
     };
@@ -889,7 +909,14 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
     };
 
     if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+        let zoom = tab.zoom;
         tab.webview = Some(webview);
+        #[cfg(target_os = "windows")]
+        if let Some(webview) = tab.webview.as_ref() {
+            unsafe {
+                let _ = webview.controller().SetZoomFactor(zoom);
+            }
+        }
     }
 
     {
@@ -897,7 +924,9 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
         if let Some(webview) = state_ref.tab(tab_id).and_then(|tab| tab.webview.as_ref()) {
             install_tab_navigation_handlers(state, webview, tab_id, proxy);
             install_download_handler(state, webview, tab_id);
-            install_favicon_handler(state, webview, tab_id);
+            if !state.borrow().private {
+                install_favicon_handler(state, webview, tab_id);
+            }
             install_accelerators_for_view(state, webview);
         }
     }
@@ -974,6 +1003,12 @@ fn navigate_active(state: &Rc<RefCell<AppState>>, input: &str) {
     }
 
     apply_layout(state);
+    let zoom = state
+        .borrow()
+        .active_tab()
+        .map(|tab| tab.zoom)
+        .unwrap_or(1.0);
+    apply_zoom(state, zoom);
     focus_active_content(state);
     push_ui_state(state);
     save_session_state(state, false);
@@ -1482,7 +1517,12 @@ fn handle_shortcut(
     alt: bool,
     shift: bool,
 ) -> bool {
-    if ctrl && shift && (virtual_key == 0x54 || scan_code == 0x14) {
+    if ctrl && shift && (virtual_key == 0x4E || scan_code == 0x31) {
+        if let Ok(exe) = std::env::current_exe() {
+            let _ = ProcessCommand::new(exe).arg("--private").spawn();
+        }
+        true
+    } else if ctrl && shift && (virtual_key == 0x54 || scan_code == 0x14) {
         let _ = state.borrow().proxy.send_event(AppEvent::Reopen);
         true
     } else if ctrl && (virtual_key == 0x54 || scan_code == 0x14) {
@@ -1502,8 +1542,31 @@ fn handle_shortcut(
             let _ = state.borrow().proxy.send_event(AppEvent::Activate(id));
         }
         true
+    } else if ctrl && (virtual_key == 0x46 || scan_code == 0x21) {
+        open_find(state);
+        true
+    } else if virtual_key == 0x1B && state.borrow().find_open {
+        close_find(state);
+        true
     } else if ctrl && (virtual_key == 0x4C || scan_code == 0x26) {
         focus_address(state);
+        true
+    } else if ctrl && (virtual_key == 0xBB || scan_code == 0x0D || virtual_key == 0x6B) {
+        zoom_active(state, 0.1);
+        true
+    } else if ctrl && (virtual_key == 0xBD || scan_code == 0x0C || virtual_key == 0x6D) {
+        zoom_active(state, -0.1);
+        true
+    } else if ctrl && virtual_key == 0x30 {
+        apply_zoom(state, 1.0);
+        true
+    } else if virtual_key == 0x7A {
+        let window = state.borrow().window.clone();
+        if window.fullscreen().is_some() {
+            window.set_fullscreen(None);
+        } else {
+            window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+        }
         true
     } else if (ctrl && (virtual_key == 0x52 || scan_code == 0x13)) || virtual_key == 0x74 {
         reload_active(state);
@@ -2111,6 +2174,64 @@ fn export_bookmarks_file(state: &Rc<RefCell<AppState>>, request_id: u64, items: 
     );
 }
 
+#[cfg(target_os = "windows")]
+fn apply_zoom(state: &Rc<RefCell<AppState>>, factor: f64) {
+    let factor = factor.clamp(0.5, 3.0);
+    let mut state = state.borrow_mut();
+    let active = state.active;
+    let Some(tab) = state.tab_mut(active) else {
+        return;
+    };
+    tab.zoom = factor;
+    if let Some(webview) = &tab.webview {
+        unsafe {
+            let _ = webview.controller().SetZoomFactor(factor);
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_zoom(_state: &Rc<RefCell<AppState>>, _factor: f64) {}
+
+#[cfg(target_os = "windows")]
+fn zoom_active(state: &Rc<RefCell<AppState>>, delta: f64) {
+    let factor = state
+        .borrow()
+        .active_tab()
+        .map(|tab| tab.zoom + delta)
+        .unwrap_or(1.0);
+    apply_zoom(state, factor);
+}
+
+#[cfg(not(target_os = "windows"))]
+fn zoom_active(_state: &Rc<RefCell<AppState>>, _delta: f64) {}
+
+fn open_find(state: &Rc<RefCell<AppState>>) {
+    state.borrow_mut().find_open = true;
+    apply_layout(state);
+    if let Some(chrome) = &state.borrow().chrome {
+        let _ = chrome
+            .evaluate_script("window.rustle && window.rustle.dispatch({type:\"find.open\"});");
+    }
+}
+
+fn close_find(state: &Rc<RefCell<AppState>>) {
+    state.borrow_mut().find_open = false;
+    apply_layout(state);
+}
+
+fn find_in_page(state: &Rc<RefCell<AppState>>, text: &str, forward: bool) {
+    let text = serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_owned());
+    let script = format!(
+        "window.find({text}, false, {}, true, false, false, false);",
+        if forward { "false" } else { "true" }
+    );
+    let state = state.borrow();
+    if let Some(webview) = state.active_tab().and_then(|tab| tab.webview.as_ref()) {
+        let _ = webview.evaluate_script(&script);
+    }
+}
+
 fn storage_query(state: &Rc<RefCell<AppState>>, request_id: u64, query: StorageQuery) {
     if let Some(storage) = &state.borrow().storage {
         let _ = storage.send(StorageCommand::Query { request_id, query });
@@ -2302,6 +2423,28 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 storage_query(state, request_id, StorageQuery::Suggest { query, limit });
             }
         }
+        Some("ui.find") => {
+            let open = message
+                .get("open")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            if open {
+                open_find(state);
+            } else {
+                close_find(state);
+            }
+        }
+        Some("find.query") => {
+            let text = message
+                .get("text")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            let forward = message
+                .get("forward")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(true);
+            find_in_page(state, text, forward);
+        }
         Some("ui.bookmarkBar") => {
             let visible = message
                 .get("visible")
@@ -2420,7 +2563,9 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                     settings.startup = value.to_owned();
                 }
             }
-            let _ = rustle_storage::save_settings(&settings);
+            if !state.borrow().private {
+                let _ = rustle_storage::save_settings(&settings);
+            }
             state.borrow_mut().settings = settings;
             push_ui_state(state);
         }
@@ -2466,11 +2611,49 @@ fn create_chrome(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
     Ok(())
 }
 
+fn cleanup_stale_private_dirs() {
+    let root = std::env::temp_dir();
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with("RustlePrivate-") {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
+        if modified
+            .elapsed()
+            .map(|age| age.as_secs() > 3600)
+            .unwrap_or(false)
+        {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+fn schedule_private_cleanup(root: PathBuf) {
+    let path = root.to_string_lossy().replace('"', "");
+    let command = format!("ping 127.0.0.1 -n 3 > nul & rmdir /s /q \"{path}\"");
+    let _ = ProcessCommand::new("cmd").args(["/C", &command]).spawn();
+}
+
 fn main() -> wry::Result<()> {
     START.get_or_init(Instant::now);
     mark("process");
 
-    if !single_instance::acquire() {
+    let private = std::env::args().any(|arg| arg == "--private");
+    if private {
+        cleanup_stale_private_dirs();
+    }
+
+    if !private && !single_instance::acquire() {
         let payload = single_instance::payload_from_args();
         let _ = single_instance::notify_existing(&payload);
         return Ok(());
@@ -2480,16 +2663,20 @@ fn main() -> wry::Result<()> {
     let event_loop = EventLoopBuilder::<AppEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
-    let ipc_proxy = proxy.clone();
-    let ipc = single_instance::start(move |message| {
-        for line in message.lines() {
-            if line == "__focus__" {
-                let _ = ipc_proxy.send_event(AppEvent::Focus);
-            } else {
-                let _ = ipc_proxy.send_event(AppEvent::OpenUrl(line.to_owned()));
+    let ipc = if private {
+        None
+    } else {
+        let ipc_proxy = proxy.clone();
+        single_instance::start(move |message| {
+            for line in message.lines() {
+                if line == "__focus__" {
+                    let _ = ipc_proxy.send_event(AppEvent::Focus);
+                } else {
+                    let _ = ipc_proxy.send_event(AppEvent::OpenUrl(line.to_owned()));
+                }
             }
-        }
-    });
+        })
+    };
 
     let window = Rc::new(
         WindowBuilder::new()
@@ -2509,7 +2696,22 @@ fn main() -> wry::Result<()> {
 
     let size = window.inner_size().to_logical::<u32>(window.scale_factor());
     let settings = rustle_storage::load_settings();
-    let context = WebContext::new(Some(data_directory()));
+    let private_root = private.then(|| {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!("RustlePrivate-{}-{stamp}", std::process::id()))
+    });
+    let webview_dir = private_root
+        .as_ref()
+        .map(|root| {
+            let dir = root.join("WebView2");
+            let _ = fs::create_dir_all(&dir);
+            dir
+        })
+        .unwrap_or_else(data_directory);
+    let context = WebContext::new(Some(webview_dir));
     let state = Rc::new(RefCell::new(AppState::new(
         window.clone(),
         context,
@@ -2522,10 +2724,15 @@ fn main() -> wry::Result<()> {
         let mut state = state.borrow_mut();
         state.stress_cycles = stress_cycles;
         state.settings = settings.clone();
-        state.storage = storage_worker::spawn(proxy.clone());
+        state.private = private;
+        state.storage = if private {
+            None
+        } else {
+            storage_worker::spawn(proxy.clone())
+        };
     }
 
-    let session = if settings.startup == "newtab" {
+    let session = if private || settings.startup == "newtab" {
         None
     } else {
         rustle_storage::load_session()
@@ -2553,6 +2760,8 @@ fn main() -> wry::Result<()> {
         let _ = proxy.send_event(AppEvent::OpenUrl(url));
     }
 
+    let private_cleanup = private_root.clone();
+
     event_loop.run(move |event, _, control_flow| {
         let _ = &ipc;
         *control_flow = ControlFlow::Wait;
@@ -2561,6 +2770,9 @@ fn main() -> wry::Result<()> {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => {
                     save_session_state(&state, true);
+                    if let Some(root) = &private_cleanup {
+                        schedule_private_cleanup(root.clone());
+                    }
                     *control_flow = ControlFlow::Exit;
                 }
                 WindowEvent::Resized(size) => {
@@ -2640,6 +2852,9 @@ fn main() -> wry::Result<()> {
             }
             Event::UserEvent(AppEvent::Exit) => {
                 save_session_state(&state, true);
+                if let Some(root) = &private_cleanup {
+                    schedule_private_cleanup(root.clone());
+                }
                 *control_flow = ControlFlow::Exit;
             }
             _ => {}

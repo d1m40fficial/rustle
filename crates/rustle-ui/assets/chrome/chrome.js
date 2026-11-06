@@ -431,6 +431,31 @@
     }
   };
 
+  const closeFind = () => {
+    const bar = byId("find-bar");
+    if (bar) {
+      bar.hidden = true;
+    }
+    send({ type: "ui.find", open: false });
+  };
+
+  const queryFind = (forward) => {
+    const input = byId("find-input");
+    const text = input ? input.value : "";
+    send({ type: "find.query", text, forward });
+  };
+
+  const openFind = () => {
+    const bar = byId("find-bar");
+    if (!bar) {
+      return;
+    }
+    bar.hidden = false;
+    const input = byId("find-input");
+    input.focus();
+    input.select();
+  };
+
   const renderBookmarkBar = (items) => {
     const bar = byId("bookmark-bar");
     if (!bar) {
@@ -507,6 +532,17 @@
     if (payload.theme) {
       document.documentElement.dataset.theme = payload.theme;
     }
+    document.documentElement.classList.toggle("private-mode", Boolean(payload.private));
+    const about = byId("about");
+    if (about) {
+      if (payload.private) {
+        about.textContent = "PRIVATE";
+        about.title = "Приватное окно";
+      } else if (current.version) {
+        about.textContent = "M3 · " + current.version;
+        about.title = "Rustle " + current.version;
+      }
+    }
 
     renderTabs(payload.tabs || [], payload.activeId || 0);
 
@@ -514,6 +550,13 @@
     const address = byId("address");
     if (document.activeElement !== address || activeChanged) {
       address.value = payload.displayUrl || payload.url || "";
+    }
+
+    const secure = Boolean(payload.secure);
+    const icon = document.querySelector(".address__icon");
+    if (icon) {
+      icon.classList.toggle("address__icon--insecure", !secure && String(payload.url || "").startsWith("http://"));
+      icon.title = secure ? "HTTPS" : "Соединение не защищено";
     }
 
     byId("back").disabled = !payload.canGoBack;
@@ -579,6 +622,8 @@
         current.version = message.version;
       } else if (message.type === "state") {
         applyState(message.payload);
+      } else if (message.type === "find.open") {
+        openFind();
       } else if (message.type === "storage.response") {
         const waiter = pending.get(message.id);
         if (!waiter) {
@@ -799,6 +844,31 @@
         });
         byId("settings-status").textContent = "Сохранено";
       });
+    }
+
+    const findInput = byId("find-input");
+    if (findInput) {
+      findInput.addEventListener("input", () => queryFind(true));
+      findInput.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closeFind();
+        } else if (event.key === "Enter") {
+          event.preventDefault();
+          queryFind(!event.shiftKey);
+        }
+      });
+    }
+    const findNext = byId("find-next");
+    if (findNext) {
+      findNext.addEventListener("click", () => queryFind(true));
+    }
+    const findPrev = byId("find-prev");
+    if (findPrev) {
+      findPrev.addEventListener("click", () => queryFind(false));
+    }
+    const findClose = byId("find-close");
+    if (findClose) {
+      findClose.addEventListener("click", closeFind);
     }
 
     const clearData = byId("clear-data");
