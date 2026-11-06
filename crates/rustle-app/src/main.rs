@@ -1,16 +1,23 @@
-//! Rustle M1: navigation, address bar sync, history state, loading UI and
-//! internal error view on top of the M0 WebView2 skeleton.
+//! Rustle M2: tabs, per-tab WebViews, session restore and tab shortcuts.
 
-use std::{borrow::Cow, cell::RefCell, path::PathBuf, rc::Rc, sync::OnceLock, time::Instant};
+use std::{
+    borrow::Cow,
+    cell::RefCell,
+    path::PathBuf,
+    rc::Rc,
+    sync::OnceLock,
+    time::{Duration, Instant},
+};
 
-use rustle_core::{ErrorInfo, VERSION, display_url, resolve_input};
+use rustle_core::{ErrorInfo, TabId, VERSION, display_url, resolve_input};
+use rustle_storage::{SESSION_VERSION, Session, SessionTab};
 use rustle_ui::{CSP, asset, mime_type};
-use serde_json::json;
+use serde_json::{Value, json};
 use tao::{
     dpi::LogicalSize as TaoLogicalSize,
     event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoopBuilder},
-    window::WindowBuilder,
+    event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
+    window::{Window, WindowBuilder},
 };
 use url::Url;
 use wry::{
@@ -23,10 +30,10 @@ use wry::{
 use wry::{WebViewBuilderExtWindows, WebViewExtWindows};
 
 const CHROME_COLLAPSED: u32 = 78;
-const CHROME_EXPANDED: u32 = 360;
 const CHROME_URL: &str = "rustle://localhost/chrome/index.html";
 const NEWTAB_URL: &str = "rustle://localhost/newtab/index.html";
 const MAX_IPC_BYTES: usize = 64 * 1024;
+const MAX_CLOSED_TABS: usize = 25;
 
 static START: OnceLock<Instant> = OnceLock::new();
 
@@ -38,50 +45,107 @@ fn mark(label: &str) {
 #[derive(Debug)]
 enum AppEvent {
     OpenUrl(String),
-    Title(String),
+    NewTab,
+    Activate(TabId),
+    Close(TabId),
+    Reopen,
+    Navigate(String),
+    Title(TabId, String),
+    Exit,
 }
 
-struct AppState {
-    content: Option<WebView>,
-    chrome: Option<WebView>,
-    width: u32,
-    height: u32,
-    chrome_height: u32,
-    ready: bool,
+struct Tab {
+    id: TabId,
     url: String,
     title: String,
     loading: bool,
     can_back: bool,
     can_forward: bool,
     error: Option<ErrorInfo>,
+    webview: Option<WebView>,
     nav_id: u64,
 }
 
-impl AppState {
-    fn new(width: u32, height: u32) -> Self {
+impl Tab {
+    fn new(id: TabId, url: String, title: String) -> Self {
         Self {
-            content: None,
-            chrome: None,
-            width,
-            height,
-            chrome_height: CHROME_COLLAPSED,
-            ready: false,
-            url: NEWTAB_URL.to_owned(),
-            title: "Новая вкладка".to_owned(),
+            id,
+            url,
+            title,
             loading: false,
             can_back: false,
             can_forward: false,
             error: None,
+            webview: None,
             nav_id: 0,
         }
     }
 }
 
+#[derive(Debug, Clone)]
+struct ClosedTab {
+    url: String,
+    title: String,
+}
+
+struct AppState {
+    window: Rc<Window>,
+    context: Option<WebContext>,
+    chrome: Option<WebView>,
+    tabs: Vec<Tab>,
+    active: TabId,
+    next_tab_id: u64,
+    closed: Vec<ClosedTab>,
+    width: u32,
+    height: u32,
+    ready: bool,
+    proxy: EventLoopProxy<AppEvent>,
+    last_save: Instant,
+}
+
+impl AppState {
+    fn new(
+        window: Rc<Window>,
+        context: WebContext,
+        width: u32,
+        height: u32,
+        proxy: EventLoopProxy<AppEvent>,
+    ) -> Self {
+        Self {
+            window,
+            context: Some(context),
+            chrome: None,
+            tabs: Vec::new(),
+            active: TabId(0),
+            next_tab_id: 1,
+            closed: Vec::new(),
+            width,
+            height,
+            ready: false,
+            proxy,
+            last_save: Instant::now(),
+        }
+    }
+
+    fn tab(&self, id: TabId) -> Option<&Tab> {
+        self.tabs.iter().find(|tab| tab.id == id)
+    }
+
+    fn tab_mut(&mut self, id: TabId) -> Option<&mut Tab> {
+        self.tabs.iter_mut().find(|tab| tab.id == id)
+    }
+
+    fn tab_index(&self, id: TabId) -> Option<usize> {
+        self.tabs.iter().position(|tab| tab.id == id)
+    }
+
+    fn active_tab(&self) -> Option<&Tab> {
+        self.tab(self.active)
+    }
+}
+
 fn data_directory() -> PathBuf {
-    let base = std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    let directory = base.join("Rustle").join("WebView2");
+    let directory = rustle_storage::data_dir().join("WebView2");
     let _ = std::fs::create_dir_all(&directory);
     directory
 }
@@ -128,51 +192,194 @@ fn protocol_handler(_id: WebViewId, request: Request<Vec<u8>>) -> Response<Cow<'
 
 fn canonicalize_internal(url: String) -> String {
     let trimmed = url.trim_end_matches('/');
-    if trimmed == "rustle://newtab" || url.starts_with("rustle://localhost/newtab") {
+    if trimmed == "rustle://newtab" || url.contains("rustle.localhost/newtab") {
         NEWTAB_URL.to_owned()
     } else {
         url
     }
 }
 
-fn effective_title(state: &AppState) -> String {
-    if state.error.is_some() {
-        return "Не удалось открыть страницу".to_owned();
+fn session_url(url: &str) -> String {
+    if url.starts_with("rustle://newtab") || url.contains("rustle.localhost/newtab") {
+        NEWTAB_URL.to_owned()
+    } else {
+        url.to_owned()
     }
-    if !state.title.is_empty() {
-        return state.title.clone();
-    }
-    if state.url.starts_with("rustle://") {
+}
+
+fn fallback_title(url: &str) -> String {
+    if url.starts_with("rustle://") || url.contains("rustle.localhost") {
         return "Новая вкладка".to_owned();
     }
-    Url::parse(&state.url)
+    Url::parse(url)
         .ok()
-        .and_then(|url| url.host_str().map(str::to_owned))
-        .unwrap_or_else(|| "Rustle".to_owned())
+        .and_then(|parsed| parsed.host_str().map(str::to_owned))
+        .unwrap_or_else(|| "Новая вкладка".to_owned())
+}
+
+fn effective_tab_title(tab: &Tab) -> String {
+    if tab.error.is_some() {
+        return "Не удалось открыть страницу".to_owned();
+    }
+    if !tab.title.is_empty() {
+        return tab.title.clone();
+    }
+    fallback_title(&tab.url)
+}
+
+fn push_tab(state: &mut AppState, url: String, title: String) -> TabId {
+    let id = TabId(state.next_tab_id);
+    state.next_tab_id += 1;
+    state.tabs.push(Tab::new(id, url, title));
+    id
+}
+
+fn save_session_state(state: &Rc<RefCell<AppState>>, clean_exit: bool) {
+    let session = {
+        let state = state.borrow();
+        let active = state.tab_index(state.active).unwrap_or(0);
+        Session {
+            version: SESSION_VERSION,
+            clean_exit,
+            active,
+            tabs: state
+                .tabs
+                .iter()
+                .map(|tab| SessionTab {
+                    url: session_url(&tab.url),
+                    title: tab.title.clone(),
+                })
+                .collect(),
+            closed: state
+                .closed
+                .iter()
+                .map(|tab| SessionTab {
+                    url: session_url(&tab.url),
+                    title: tab.title.clone(),
+                })
+                .collect(),
+        }
+    };
+
+    if let Err(error) = rustle_storage::save_session(&session) {
+        eprintln!("[session] save failed: {error}");
+    }
+    state.borrow_mut().last_save = Instant::now();
+}
+
+fn save_session_due(state: &Rc<RefCell<AppState>>) {
+    let due = state.borrow().last_save.elapsed() >= Duration::from_millis(800);
+    if due {
+        save_session_state(state, false);
+    }
+}
+
+fn restore_session(state: &Rc<RefCell<AppState>>, session: Option<Session>) {
+    let mut state = state.borrow_mut();
+    let session = session.unwrap_or_default();
+
+    let closed = session.closed;
+    if session.tabs.is_empty() {
+        let id = push_tab(
+            &mut state,
+            NEWTAB_URL.to_owned(),
+            "Новая вкладка".to_owned(),
+        );
+        state.active = id;
+    } else {
+        for tab in session.tabs {
+            let url = canonicalize_internal(if tab.url.is_empty() {
+                NEWTAB_URL.to_owned()
+            } else {
+                tab.url
+            });
+            push_tab(&mut state, url, tab.title);
+        }
+        let active_index = session.active.min(state.tabs.len().saturating_sub(1));
+        state.active = state.tabs[active_index].id;
+    }
+    state.closed = closed
+        .into_iter()
+        .take(MAX_CLOSED_TABS)
+        .map(|tab| ClosedTab {
+            url: canonicalize_internal(tab.url),
+            title: tab.title,
+        })
+        .collect();
 }
 
 fn push_ui_state(state: &Rc<RefCell<AppState>>) {
-    let payload = {
+    let (payload, window_title) = {
         let state = state.borrow();
         if !state.ready {
             return;
         }
-        json!({
-            "url": state.url,
-            "displayUrl": display_url(&state.url),
-            "title": effective_title(&state),
-            "loading": state.loading,
-            "canGoBack": state.can_back,
-            "canGoForward": state.can_forward,
-            "error": state.error.clone(),
-        })
+
+        let active = state.active_tab();
+        let tabs: Vec<Value> = state
+            .tabs
+            .iter()
+            .map(|tab| {
+                json!({
+                    "id": tab.id.0,
+                    "title": effective_tab_title(tab),
+                    "url": display_url(&tab.url),
+                    "loading": tab.loading,
+                    "active": tab.id == state.active,
+                    "error": tab.error.clone(),
+                })
+            })
+            .collect();
+
+        let (url, title, loading, can_back, can_forward, error) = active
+            .map(|tab| {
+                (
+                    tab.url.clone(),
+                    effective_tab_title(tab),
+                    tab.loading,
+                    tab.can_back,
+                    tab.can_forward,
+                    tab.error.clone(),
+                )
+            })
+            .unwrap_or_else(|| {
+                (
+                    String::new(),
+                    "Rustle".to_owned(),
+                    false,
+                    false,
+                    false,
+                    None,
+                )
+            });
+
+        let payload = json!({
+            "tabs": tabs,
+            "activeId": state.active.0,
+            "url": url,
+            "displayUrl": display_url(&url),
+            "title": title,
+            "loading": loading,
+            "canGoBack": can_back,
+            "canGoForward": can_forward,
+            "error": error,
+        });
+
+        let window_title = if title == "Новая вкладка" || title == "Rustle" {
+            "Rustle".to_owned()
+        } else {
+            format!("{title} — Rustle")
+        };
+
+        (payload, window_title)
     };
 
+    state.borrow().window.set_title(&window_title);
     let script = format!(
         "window.rustle && window.rustle.dispatch({{\"type\":\"state\",\"payload\":{payload}}});"
     );
-    let state = state.borrow();
-    if let Some(chrome) = &state.chrome {
+    let state_ref = state.borrow();
+    if let Some(chrome) = &state_ref.chrome {
         if let Err(error) = chrome.evaluate_script(&script) {
             eprintln!("[ui] state push failed: {error}");
         }
@@ -215,129 +422,108 @@ fn history_flags(_content: &WebView) -> (bool, bool) {
     (false, false)
 }
 
-fn sync_from_content(state: &Rc<RefCell<AppState>>) {
+fn sync_tab_from_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
     let snapshot = {
         let state = state.borrow();
-        let Some(content) = &state.content else {
+        let Some(tab) = state.tab(tab_id) else {
             return;
         };
-        let url = content.url().unwrap_or_else(|_| state.url.clone());
+        let Some(content) = &tab.webview else {
+            return;
+        };
+        let url = content.url().unwrap_or_else(|_| tab.url.clone());
         let (back, forward) = history_flags(content);
         (url, back, forward)
     };
 
     let mut state = state.borrow_mut();
-    if state.error.is_none() {
-        state.url = snapshot.0;
+    if let Some(tab) = state.tab_mut(tab_id) {
+        if tab.error.is_none() {
+            tab.url = snapshot.0;
+        }
+        tab.can_back = snapshot.1;
+        tab.can_forward = snapshot.2;
     }
-    state.can_back = snapshot.1;
-    state.can_forward = snapshot.2;
 }
 
-fn leave_error_mode(state: &Rc<RefCell<AppState>>) {
-    let (width, height, had_error) = {
-        let mut state = state.borrow_mut();
-        if state.error.take().is_some() {
-            state.chrome_height = CHROME_COLLAPSED;
-            (state.width, state.height, true)
-        } else {
-            (0, 0, false)
+#[cfg(target_os = "windows")]
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn SetWindowPos(
+        hwnd: isize,
+        insert_after: isize,
+        x: i32,
+        y: i32,
+        cx: i32,
+        cy: i32,
+        flags: u32,
+    ) -> i32;
+}
+
+fn raise_chrome(state: &Rc<RefCell<AppState>>) {
+    #[cfg(target_os = "windows")]
+    {
+        const HWND_TOP: isize = 0;
+        const SWP_NOSIZE: u32 = 0x0001;
+        const SWP_NOMOVE: u32 = 0x0002;
+        const SWP_NOACTIVATE: u32 = 0x0010;
+
+        let hwnd = {
+            let state = state.borrow();
+            state.chrome.as_ref().map(|chrome| chrome.hwnd().0 as isize)
+        };
+        if let Some(hwnd) = hwnd {
+            unsafe {
+                SetWindowPos(
+                    hwnd,
+                    HWND_TOP,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE,
+                );
+            }
         }
+    }
+}
+
+fn apply_layout(state: &Rc<RefCell<AppState>>) {
+    let (width, height, active, error_mode) = {
+        let state = state.borrow();
+        let error_mode = state.active_tab().is_some_and(|tab| tab.error.is_some());
+        (state.width, state.height, state.active, error_mode)
     };
 
-    if !had_error {
-        return;
-    }
-
-    let state = state.borrow();
-    if let Some(chrome) = &state.chrome {
-        let _ = chrome.set_bounds(rect(0, 0, width, CHROME_COLLAPSED));
-    }
-    if let Some(content) = &state.content {
-        let _ = content.set_visible(true);
-        let _ = content.set_bounds(rect(
-            0,
-            CHROME_COLLAPSED,
-            width,
-            height.saturating_sub(CHROME_COLLAPSED),
-        ));
-    }
-}
-
-fn navigate_to_url(state: &Rc<RefCell<AppState>>, url: String) {
-    let url = canonicalize_internal(url);
-    leave_error_mode(state);
+    let chrome_height = if error_mode { height } else { CHROME_COLLAPSED };
 
     {
-        let mut state = state.borrow_mut();
-        state.url = url.clone();
-        state.title.clear();
-        state.loading = true;
-        state.chrome_height = CHROME_COLLAPSED;
-
-        let width = state.width;
-        let height = state.height;
+        let state = state.borrow();
         if let Some(chrome) = &state.chrome {
-            let _ = chrome.set_bounds(rect(0, 0, width, CHROME_COLLAPSED));
+            let _ = chrome.set_bounds(rect(0, 0, width, chrome_height));
         }
-        let load_result = if let Some(content) = &state.content {
-            let _ = content.set_visible(true);
-            let _ = content.set_bounds(rect(
-                0,
-                CHROME_COLLAPSED,
-                width,
-                height.saturating_sub(CHROME_COLLAPSED),
-            ));
-            let result = content.load_url(&url);
-            let _ = content.focus();
-            Some(result)
-        } else {
-            None
-        };
 
-        match load_result {
-            Some(Ok(())) => println!("[nav] {url}"),
-            Some(Err(error)) => {
-                eprintln!("[nav] load_url failed: {error}");
-                state.loading = false;
-            }
-            None => {
-                state.loading = false;
+        for tab in &state.tabs {
+            let Some(webview) = &tab.webview else {
+                continue;
+            };
+            if error_mode {
+                let _ = webview.set_visible(false);
+            } else if tab.id == active {
+                let _ = webview.set_visible(true);
+                let _ = webview.set_bounds(rect(
+                    0,
+                    CHROME_COLLAPSED,
+                    width,
+                    height.saturating_sub(CHROME_COLLAPSED),
+                ));
+            } else {
+                let _ = webview.set_visible(false);
             }
         }
     }
 
-    push_ui_state(state);
-}
-
-fn navigate_input(state: &Rc<RefCell<AppState>>, input: &str) {
-    let Some(target) = resolve_input(input) else {
-        return;
-    };
-    navigate_to_url(state, target.into_url());
-}
-
-fn show_error(state: &Rc<RefCell<AppState>>, error: ErrorInfo) {
-    let (width, height) = {
-        let mut state = state.borrow_mut();
-        state.error = Some(error);
-        state.loading = false;
-        state.title = "Не удалось открыть страницу".to_owned();
-        state.chrome_height = state.height;
-        (state.width, state.height)
-    };
-
-    let state_ref = state.borrow();
-    if let Some(content) = &state_ref.content {
-        let _ = content.set_visible(false);
-    }
-    if let Some(chrome) = &state_ref.chrome {
-        let _ = chrome.set_bounds(rect(0, 0, width, height));
-        let _ = chrome.focus();
-    }
-    drop(state_ref);
-
-    push_ui_state(state);
+    raise_chrome(state);
 }
 
 fn focus_address(state: &Rc<RefCell<AppState>>) {
@@ -351,246 +537,316 @@ fn focus_address(state: &Rc<RefCell<AppState>>) {
     }
 }
 
-fn reload(state: &Rc<RefCell<AppState>>) {
-    if state.borrow().error.is_some() {
-        let url = state.borrow().url.clone();
-        navigate_to_url(state, url);
+fn focus_active_content(state: &Rc<RefCell<AppState>>) {
+    let state = state.borrow();
+    if state.active_tab().is_some_and(|tab| tab.error.is_some()) {
+        if let Some(chrome) = &state.chrome {
+            let _ = chrome.focus();
+        }
+        return;
+    }
+    if let Some(content) = state.active_tab().and_then(|tab| tab.webview.as_ref()) {
+        let _ = content.focus();
+    }
+}
+
+fn on_navigation(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: String) {
+    let collapse = {
+        let mut state = state.borrow_mut();
+        let active = state.active;
+        let Some(tab) = state.tab_mut(tab_id) else {
+            return;
+        };
+        let had_error = tab.error.take().is_some();
+        tab.url = url;
+        tab.title.clear();
+        tab.loading = true;
+        had_error && active == tab_id
+    };
+
+    if collapse {
+        apply_layout(state);
+        focus_active_content(state);
+    }
+    push_ui_state(state);
+    save_session_due(state);
+}
+
+fn on_title(state: &Rc<RefCell<AppState>>, tab_id: TabId, title: String) {
+    {
+        let mut state = state.borrow_mut();
+        if let Some(tab) = state.tab_mut(tab_id) {
+            if tab.error.is_none() {
+                tab.title = title;
+            }
+        }
+    }
+    push_ui_state(state);
+    save_session_due(state);
+}
+
+fn on_page_load(state: &Rc<RefCell<AppState>>, tab_id: TabId, event: PageLoadEvent) {
+    match event {
+        PageLoadEvent::Started => {
+            if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+                tab.loading = true;
+            }
+        }
+        PageLoadEvent::Finished => {
+            sync_tab_from_webview(state, tab_id);
+            if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+                tab.loading = false;
+            }
+        }
+    }
+    push_ui_state(state);
+    save_session_due(state);
+}
+
+fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
+    let (url, visible, width, height, window, proxy) = {
+        let state = state.borrow();
+        let Some(tab) = state.tab(tab_id) else {
+            return;
+        };
+        if tab.webview.is_some() {
+            return;
+        }
+        (
+            tab.url.clone(),
+            tab.id == state.active,
+            state.width,
+            state.height,
+            state.window.clone(),
+            state.proxy.clone(),
+        )
+    };
+
+    let Some(mut context) = state.borrow_mut().context.take() else {
+        eprintln!("[tabs] WebContext is missing");
+        return;
+    };
+
+    let navigation_state = Rc::clone(state);
+    let title_state = Rc::clone(state);
+    let load_state = Rc::clone(state);
+    let new_window_proxy = proxy.clone();
+
+    let builder = WebViewBuilder::new_with_web_context(&mut context)
+        .with_bounds(rect(
+            0,
+            CHROME_COLLAPSED,
+            width,
+            height.saturating_sub(CHROME_COLLAPSED),
+        ))
+        .with_visible(visible)
+        .with_browser_accelerator_keys(false)
+        .with_custom_protocol("rustle".into(), protocol_handler)
+        .with_navigation_handler(move |url| {
+            on_navigation(&navigation_state, tab_id, url);
+            true
+        })
+        .with_document_title_changed_handler(move |title| {
+            on_title(&title_state, tab_id, title);
+        })
+        .with_on_page_load_handler(move |event, _url| {
+            on_page_load(&load_state, tab_id, event);
+        })
+        .with_new_window_req_handler(move |url, _features| {
+            let _ = new_window_proxy.send_event(AppEvent::OpenUrl(url));
+            NewWindowResponse::Deny
+        })
+        .with_url(&url);
+
+    let result = builder.build_as_child(window.as_ref());
+    state.borrow_mut().context = Some(context);
+
+    let webview = match result {
+        Ok(webview) => webview,
+        Err(error) => {
+            eprintln!("[tabs] failed to create WebView: {error}");
+            if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+                tab.loading = false;
+                tab.error = Some(ErrorInfo {
+                    code: "render".to_owned(),
+                    message: "Не удалось создать вкладку.".to_owned(),
+                });
+            }
+            push_ui_state(state);
+            return;
+        }
+    };
+
+    if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+        tab.webview = Some(webview);
+    }
+
+    {
+        let state_ref = state.borrow();
+        if let Some(webview) = state_ref.tab(tab_id).and_then(|tab| tab.webview.as_ref()) {
+            install_tab_navigation_handlers(state, webview, tab_id, proxy);
+            install_accelerators_for_view(state, webview);
+        }
+    }
+
+    raise_chrome(state);
+}
+
+fn navigate_active(state: &Rc<RefCell<AppState>>, input: &str) {
+    let Some(target) = resolve_input(input) else {
+        return;
+    };
+    let url = canonicalize_internal(target.into_url());
+    let active = state.borrow().active;
+    let had_webview = state
+        .borrow()
+        .tab(active)
+        .is_some_and(|tab| tab.webview.is_some());
+
+    {
+        let mut state = state.borrow_mut();
+        let Some(tab) = state.tab_mut(active) else {
+            return;
+        };
+        tab.url = url.clone();
+        tab.title.clear();
+        tab.loading = true;
+        tab.error = None;
+    }
+
+    ensure_tab_webview(state, active);
+
+    if had_webview {
+        let loaded = {
+            let state = state.borrow();
+            state
+                .tab(active)
+                .and_then(|tab| tab.webview.as_ref())
+                .map(|webview| webview.load_url(&url).is_ok())
+                .unwrap_or(false)
+        };
+        if !loaded {
+            if let Some(tab) = state.borrow_mut().tab_mut(active) {
+                tab.loading = false;
+            }
+        }
+    }
+
+    apply_layout(state);
+    focus_active_content(state);
+    push_ui_state(state);
+    save_session_state(state, false);
+}
+
+fn reload_active(state: &Rc<RefCell<AppState>>) {
+    let active = state.borrow().active;
+    let (url, error) = {
+        let state = state.borrow();
+        let Some(tab) = state.tab(active) else {
+            return;
+        };
+        (tab.url.clone(), tab.error.is_some())
+    };
+
+    if error {
+        navigate_active(state, &url);
         return;
     }
 
-    let loaded = {
+    let reloaded = {
         let state = state.borrow();
         state
-            .content
-            .as_ref()
-            .map(|content| content.reload().is_ok())
+            .tab(active)
+            .and_then(|tab| tab.webview.as_ref())
+            .map(|webview| webview.reload().is_ok())
             .unwrap_or(false)
     };
-    if loaded {
-        state.borrow_mut().loading = true;
+    if reloaded {
+        if let Some(tab) = state.borrow_mut().tab_mut(active) {
+            tab.loading = true;
+        }
         push_ui_state(state);
     }
 }
 
-fn stop(state: &Rc<RefCell<AppState>>) {
-    let state_ref = state.borrow();
-    if let Some(content) = &state_ref.content {
-        let _ = content.evaluate_script("window.stop()");
+fn stop_active(state: &Rc<RefCell<AppState>>) {
+    let active = state.borrow().active;
+    {
+        let state = state.borrow();
+        if let Some(webview) = state.tab(active).and_then(|tab| tab.webview.as_ref()) {
+            let _ = webview.evaluate_script("window.stop()");
+        }
     }
-    drop(state_ref);
-
-    state.borrow_mut().loading = false;
+    if let Some(tab) = state.borrow_mut().tab_mut(active) {
+        tab.loading = false;
+    }
     push_ui_state(state);
 }
 
-fn go_back(state: &Rc<RefCell<AppState>>) {
-    if !state.borrow().can_back {
+fn go_back_active(state: &Rc<RefCell<AppState>>) {
+    let active = state.borrow().active;
+    if state
+        .borrow()
+        .tab(active)
+        .is_some_and(|tab| !tab.can_back || tab.error.is_some())
+    {
         return;
     }
-    leave_error_mode(state);
-
     let moved = {
         let state = state.borrow();
         state
-            .content
-            .as_ref()
-            .map(|content| content.go_back().is_ok())
+            .tab(active)
+            .and_then(|tab| tab.webview.as_ref())
+            .map(|webview| webview.go_back().is_ok())
             .unwrap_or(false)
     };
     if moved {
-        state.borrow_mut().loading = true;
+        if let Some(tab) = state.borrow_mut().tab_mut(active) {
+            tab.loading = true;
+        }
         push_ui_state(state);
     }
 }
 
-fn go_forward(state: &Rc<RefCell<AppState>>) {
-    if !state.borrow().can_forward {
+fn go_forward_active(state: &Rc<RefCell<AppState>>) {
+    let active = state.borrow().active;
+    if state
+        .borrow()
+        .tab(active)
+        .is_some_and(|tab| !tab.can_forward || tab.error.is_some())
+    {
         return;
     }
-    leave_error_mode(state);
-
     let moved = {
         let state = state.borrow();
         state
-            .content
-            .as_ref()
-            .map(|content| content.go_forward().is_ok())
+            .tab(active)
+            .and_then(|tab| tab.webview.as_ref())
+            .map(|webview| webview.go_forward().is_ok())
             .unwrap_or(false)
     };
     if moved {
-        state.borrow_mut().loading = true;
+        if let Some(tab) = state.borrow_mut().tab_mut(active) {
+            tab.loading = true;
+        }
         push_ui_state(state);
     }
 }
 
-fn open_devtools(state: &Rc<RefCell<AppState>>) {
+fn open_devtools_active(state: &Rc<RefCell<AppState>>) {
+    let active = state.borrow().active;
     let state = state.borrow();
-    if let Some(content) = &state.content {
-        content.open_devtools();
-    }
-}
-
-fn toggle_overlay(state: &Rc<RefCell<AppState>>) {
-    let mut state = state.borrow_mut();
-    if state.error.is_some() {
-        return;
-    }
-
-    let expanded = state.chrome_height == CHROME_COLLAPSED;
-    let height = if expanded {
-        CHROME_EXPANDED
-    } else {
-        CHROME_COLLAPSED
-    };
-    state.chrome_height = height;
-
-    let width = state.width;
-    if let Some(chrome) = &state.chrome {
-        let _ = chrome.set_bounds(rect(0, 0, width, height));
-        let script = format!("document.documentElement.classList.toggle('expanded', {expanded});");
-        let _ = chrome.evaluate_script(&script);
-    }
-}
-
-fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
-    if body.len() > MAX_IPC_BYTES {
-        eprintln!("[ipc] message too large: {} bytes", body.len());
-        return;
-    }
-
-    let Ok(message) = serde_json::from_str::<serde_json::Value>(body) else {
-        eprintln!("[ipc] invalid json");
-        return;
-    };
-
-    match message.get("type").and_then(|value| value.as_str()) {
-        Some("chrome.ready") => {
-            mark("chrome-ready");
-            state.borrow_mut().ready = true;
-            send_app_info(state);
-            push_ui_state(state);
-        }
-        Some("ui.toggleOverlay") => toggle_overlay(state),
-        Some("nav.go") => {
-            if let Some(url) = message.get("url").and_then(|value| value.as_str()) {
-                navigate_input(state, url);
-            }
-        }
-        Some("nav.back") => go_back(state),
-        Some("nav.forward") => go_forward(state),
-        Some("nav.reload") => reload(state),
-        Some("nav.stop") => stop(state),
-        Some("nav.retry") => reload(state),
-        Some(other) => eprintln!("[ipc] unknown message: {other}"),
-        None => eprintln!("[ipc] missing type"),
+    if let Some(webview) = state.tab(active).and_then(|tab| tab.webview.as_ref()) {
+        webview.open_devtools();
     }
 }
 
 #[cfg(target_os = "windows")]
-#[link(name = "user32")]
-unsafe extern "system" {
-    fn GetKeyState(vkey: i32) -> i16;
-}
-
-#[cfg(target_os = "windows")]
-fn install_accelerators(state: &Rc<RefCell<AppState>>) {
-    use webview2_com::{
-        AcceleratorKeyPressedEventHandler,
-        Microsoft::Web::WebView2::Win32::{
-            COREWEBVIEW2_KEY_EVENT_KIND, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
-            COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN, COREWEBVIEW2_PHYSICAL_KEY_STATUS,
-        },
-    };
-
-    let controllers = {
-        let state = state.borrow();
-        let mut controllers = Vec::new();
-        if let Some(content) = &state.content {
-            controllers.push(content.controller());
-        }
-        if let Some(chrome) = &state.chrome {
-            controllers.push(chrome.controller());
-        }
-        controllers
-    };
-
-    for controller in controllers {
-        let state = Rc::clone(state);
-        let mut token = 0i64;
-        let handler = AcceleratorKeyPressedEventHandler::create(Box::new(move |_sender, args| {
-            let Some(args) = args else {
-                return Ok(());
-            };
-
-            let mut kind = COREWEBVIEW2_KEY_EVENT_KIND(0);
-            unsafe {
-                let _ = args.KeyEventKind(&mut kind);
-            }
-            if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
-                && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
-            {
-                return Ok(());
-            }
-
-            let mut virtual_key = 0u32;
-            unsafe {
-                let _ = args.VirtualKey(&mut virtual_key);
-            }
-
-            let mut physical = unsafe { std::mem::zeroed::<COREWEBVIEW2_PHYSICAL_KEY_STATUS>() };
-            unsafe {
-                let _ = args.PhysicalKeyStatus(&mut physical);
-            }
-
-            let ctrl_down = unsafe { GetKeyState(0x11) } < 0;
-            let alt_down = unsafe { GetKeyState(0x12) } < 0;
-            let scan_code = physical.ScanCode;
-
-            let handled = if ctrl_down && (virtual_key == 0x4C || scan_code == 0x26) {
-                focus_address(&state);
-                true
-            } else if (ctrl_down && (virtual_key == 0x52 || scan_code == 0x13))
-                || virtual_key == 0x74
-            {
-                reload(&state);
-                true
-            } else if virtual_key == 0x7B {
-                open_devtools(&state);
-                true
-            } else if alt_down && virtual_key == 0x25 {
-                go_back(&state);
-                true
-            } else if alt_down && virtual_key == 0x27 {
-                go_forward(&state);
-                true
-            } else if virtual_key == 0x1B && state.borrow().loading {
-                stop(&state);
-                true
-            } else {
-                false
-            };
-
-            if handled {
-                unsafe {
-                    let _ = args.SetHandled(true);
-                }
-            }
-
-            Ok(())
-        }));
-
-        unsafe {
-            if let Err(error) = controller.add_AcceleratorKeyPressed(&handler, &mut token) {
-                eprintln!("[shortcut] failed to register accelerator handler: {error}");
-            }
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn install_navigation_handler(
+fn install_tab_navigation_handlers(
     state: &Rc<RefCell<AppState>>,
-    proxy: tao::event_loop::EventLoopProxy<AppEvent>,
+    webview: &WebView,
+    tab_id: TabId,
+    proxy: EventLoopProxy<AppEvent>,
 ) {
     use webview2_com::{
         Microsoft::Web::WebView2::Win32::{
@@ -599,15 +855,6 @@ fn install_navigation_handler(
         NavigationCompletedEventHandler, NavigationStartingEventHandler,
     };
     use windows_core::BOOL;
-
-    let webview = state
-        .borrow()
-        .content
-        .as_ref()
-        .map(|content| content.webview());
-    let Some(webview) = webview else {
-        return;
-    };
 
     let start_state = Rc::clone(state);
     let mut start_token = 0i64;
@@ -619,13 +866,18 @@ fn install_navigation_handler(
         unsafe {
             let _ = args.NavigationId(&mut navigation_id);
         }
-        start_state.borrow_mut().nav_id = navigation_id;
+        if let Some(tab) = start_state.borrow_mut().tab_mut(tab_id) {
+            tab.nav_id = navigation_id;
+        }
         Ok(())
     }));
 
     unsafe {
-        if let Err(error) = webview.add_NavigationStarting(&start_handler, &mut start_token) {
-            eprintln!("[nav] failed to register starting handler: {error}");
+        if let Err(error) = webview
+            .webview()
+            .add_NavigationStarting(&start_handler, &mut start_token)
+        {
+            eprintln!("[tabs] failed to register starting handler: {error}");
         }
     }
 
@@ -640,7 +892,11 @@ fn install_navigation_handler(
         unsafe {
             let _ = args.NavigationId(&mut navigation_id);
         }
-        let current_id = state.borrow().nav_id;
+        let current_id = state
+            .borrow()
+            .tab(tab_id)
+            .map(|tab| tab.nav_id)
+            .unwrap_or(0);
         if current_id != 0 && navigation_id != 0 && navigation_id != current_id {
             return Ok(());
         }
@@ -651,21 +907,35 @@ fn install_navigation_handler(
         }
 
         if success.as_bool() {
-            let had_error = state.borrow().error.is_some();
+            let active = state.borrow().active;
+            let had_error = state
+                .borrow()
+                .tab(tab_id)
+                .is_some_and(|tab| tab.error.is_some());
+
             if had_error {
-                leave_error_mode(&state);
-                state.borrow_mut().title.clear();
+                if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+                    tab.error = None;
+                    tab.title.clear();
+                }
+                if active == tab_id {
+                    apply_layout(&state);
+                    focus_active_content(&state);
+                }
             }
-            sync_from_content(&state);
-            state.borrow_mut().loading = false;
+
+            sync_tab_from_webview(&state, tab_id);
+            if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+                tab.loading = false;
+            }
             push_ui_state(&state);
 
             let state_ref = state.borrow();
-            if let Some(content) = &state_ref.content {
+            if let Some(content) = state_ref.tab(tab_id).and_then(|tab| tab.webview.as_ref()) {
                 let proxy = proxy.clone();
                 let _ = content.evaluate_script_with_callback("document.title", move |title| {
                     let title = serde_json::from_str::<String>(&title).unwrap_or(title);
-                    let _ = proxy.send_event(AppEvent::Title(title));
+                    let _ = proxy.send_event(AppEvent::Title(tab_id, title));
                 });
             }
             return Ok(());
@@ -677,22 +947,56 @@ fn install_navigation_handler(
         }
 
         if status == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {
-            state.borrow_mut().loading = false;
+            if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+                tab.loading = false;
+            }
             push_ui_state(&state);
             return Ok(());
         }
 
         let error = error_info(status);
-        eprintln!("[nav] failed: {}", error.code);
-        show_error(&state, error);
+        eprintln!("[nav] tab {} failed: {}", tab_id.0, error.code);
+        set_tab_error(&state, tab_id, error);
         Ok(())
     }));
 
     unsafe {
-        if let Err(error) = webview.add_NavigationCompleted(&handler, &mut token) {
-            eprintln!("[nav] failed to register completion handler: {error}");
+        if let Err(error) = webview
+            .webview()
+            .add_NavigationCompleted(&handler, &mut token)
+        {
+            eprintln!("[tabs] failed to register completion handler: {error}");
         }
     }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn install_tab_navigation_handlers(
+    _state: &Rc<RefCell<AppState>>,
+    _webview: &WebView,
+    _tab_id: TabId,
+    _proxy: EventLoopProxy<AppEvent>,
+) {
+}
+
+fn set_tab_error(state: &Rc<RefCell<AppState>>, tab_id: TabId, error: ErrorInfo) {
+    let active = state.borrow().active;
+    {
+        let mut state = state.borrow_mut();
+        if let Some(tab) = state.tab_mut(tab_id) {
+            tab.error = Some(error);
+            tab.loading = false;
+            tab.title = "Не удалось открыть страницу".to_owned();
+        }
+    }
+
+    if active == tab_id {
+        apply_layout(state);
+        if let Some(chrome) = &state.borrow().chrome {
+            let _ = chrome.focus();
+        }
+    }
+    push_ui_state(state);
 }
 
 #[cfg(target_os = "windows")]
@@ -738,6 +1042,357 @@ fn error_info(
     }
 }
 
+fn activate_tab(state: &Rc<RefCell<AppState>>, id: TabId) {
+    let exists = state.borrow().tab(id).is_some();
+    if !exists {
+        return;
+    }
+
+    let previous = state.borrow().active;
+    if previous == id {
+        ensure_tab_webview(state, id);
+        apply_layout(state);
+        focus_active_content(state);
+        push_ui_state(state);
+        return;
+    }
+
+    {
+        let state = state.borrow();
+        if let Some(webview) = state.tab(previous).and_then(|tab| tab.webview.as_ref()) {
+            let _ = webview.set_visible(false);
+        }
+    }
+
+    state.borrow_mut().active = id;
+    ensure_tab_webview(state, id);
+    apply_layout(state);
+    focus_active_content(state);
+    push_ui_state(state);
+    save_session_state(state, false);
+}
+
+fn close_tab(state: &Rc<RefCell<AppState>>, id: TabId) {
+    let (index, was_active) = {
+        let state = state.borrow();
+        let Some(index) = state.tab_index(id) else {
+            return;
+        };
+        (index, state.active == id)
+    };
+
+    let removed = {
+        let mut state = state.borrow_mut();
+        state.tabs.remove(index)
+    };
+
+    {
+        let mut state = state.borrow_mut();
+        state.closed.push(ClosedTab {
+            url: removed.url.clone(),
+            title: removed.title.clone(),
+        });
+        if state.closed.len() > MAX_CLOSED_TABS {
+            state.closed.remove(0);
+        }
+    }
+    drop(removed);
+
+    if state.borrow().tabs.is_empty() {
+        let _ = state.borrow().proxy.send_event(AppEvent::Exit);
+        return;
+    }
+
+    if was_active {
+        let next_index = index.min(state.borrow().tabs.len().saturating_sub(1));
+        let next_id = state.borrow().tabs[next_index].id;
+        state.borrow_mut().active = next_id;
+        ensure_tab_webview(state, next_id);
+        apply_layout(state);
+        focus_active_content(state);
+        push_ui_state(state);
+    } else {
+        apply_layout(state);
+        push_ui_state(state);
+    }
+    save_session_state(state, false);
+}
+
+fn new_tab(state: &Rc<RefCell<AppState>>) {
+    let id = {
+        let mut state = state.borrow_mut();
+        push_tab(
+            &mut state,
+            NEWTAB_URL.to_owned(),
+            "Новая вкладка".to_owned(),
+        )
+    };
+    activate_tab(state, id);
+    focus_address(state);
+}
+
+fn open_tab(state: &Rc<RefCell<AppState>>, url: String) {
+    let url = canonicalize_internal(url);
+    let title = fallback_title(&url);
+    let id = {
+        let mut state = state.borrow_mut();
+        push_tab(&mut state, url, title)
+    };
+    activate_tab(state, id);
+}
+
+fn reopen_closed_tab(state: &Rc<RefCell<AppState>>) {
+    let closed = state.borrow_mut().closed.pop();
+    let Some(closed) = closed else {
+        return;
+    };
+    let url = canonicalize_internal(if closed.url.is_empty() {
+        NEWTAB_URL.to_owned()
+    } else {
+        closed.url
+    });
+    let id = {
+        let mut state = state.borrow_mut();
+        push_tab(&mut state, url, closed.title)
+    };
+    activate_tab(state, id);
+}
+
+fn next_tab_id(state: &Rc<RefCell<AppState>>, delta: isize) -> Option<TabId> {
+    let state = state.borrow();
+    let index = state.tab_index(state.active)?;
+    if state.tabs.len() < 2 {
+        return None;
+    }
+    let next = (index as isize + delta).rem_euclid(state.tabs.len() as isize) as usize;
+    Some(state.tabs[next].id)
+}
+
+fn tab_number_id(state: &Rc<RefCell<AppState>>, number: u32) -> Option<TabId> {
+    let state = state.borrow();
+    let length = state.tabs.len();
+    if length == 0 {
+        return None;
+    }
+    let index = if number == 9 {
+        length - 1
+    } else {
+        number as usize - 1
+    };
+    state.tabs.get(index).map(|tab| tab.id)
+}
+
+#[cfg(target_os = "windows")]
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn GetKeyState(vkey: i32) -> i16;
+}
+
+#[cfg(target_os = "windows")]
+fn handle_shortcut(
+    state: &Rc<RefCell<AppState>>,
+    virtual_key: u32,
+    scan_code: u32,
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+) -> bool {
+    if ctrl && shift && (virtual_key == 0x54 || scan_code == 0x14) {
+        let _ = state.borrow().proxy.send_event(AppEvent::Reopen);
+        true
+    } else if ctrl && (virtual_key == 0x54 || scan_code == 0x14) {
+        let _ = state.borrow().proxy.send_event(AppEvent::NewTab);
+        true
+    } else if ctrl && (virtual_key == 0x57 || scan_code == 0x11) {
+        let active = state.borrow().active;
+        let _ = state.borrow().proxy.send_event(AppEvent::Close(active));
+        true
+    } else if ctrl && virtual_key == 0x09 {
+        if let Some(id) = next_tab_id(state, if shift { -1 } else { 1 }) {
+            let _ = state.borrow().proxy.send_event(AppEvent::Activate(id));
+        }
+        true
+    } else if ctrl && (0x31..=0x39).contains(&virtual_key) {
+        if let Some(id) = tab_number_id(state, virtual_key - 0x30) {
+            let _ = state.borrow().proxy.send_event(AppEvent::Activate(id));
+        }
+        true
+    } else if ctrl && (virtual_key == 0x4C || scan_code == 0x26) {
+        focus_address(state);
+        true
+    } else if (ctrl && (virtual_key == 0x52 || scan_code == 0x13)) || virtual_key == 0x74 {
+        reload_active(state);
+        true
+    } else if virtual_key == 0x7B {
+        open_devtools_active(state);
+        true
+    } else if alt && virtual_key == 0x25 {
+        go_back_active(state);
+        true
+    } else if alt && virtual_key == 0x27 {
+        go_forward_active(state);
+        true
+    } else if virtual_key == 0x1B && state.borrow().active_tab().is_some_and(|tab| tab.loading) {
+        stop_active(state);
+        true
+    } else {
+        false
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn install_accelerators_for_view(state: &Rc<RefCell<AppState>>, webview: &WebView) {
+    use webview2_com::{
+        AcceleratorKeyPressedEventHandler,
+        Microsoft::Web::WebView2::Win32::{
+            COREWEBVIEW2_KEY_EVENT_KIND, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
+            COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN, COREWEBVIEW2_PHYSICAL_KEY_STATUS,
+        },
+    };
+
+    let controller = webview.controller();
+    let state = Rc::clone(state);
+    let mut token = 0i64;
+    let handler = AcceleratorKeyPressedEventHandler::create(Box::new(move |_sender, args| {
+        let Some(args) = args else {
+            return Ok(());
+        };
+
+        let mut kind = COREWEBVIEW2_KEY_EVENT_KIND(0);
+        unsafe {
+            let _ = args.KeyEventKind(&mut kind);
+        }
+        if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+            && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
+        {
+            return Ok(());
+        }
+
+        let mut virtual_key = 0u32;
+        unsafe {
+            let _ = args.VirtualKey(&mut virtual_key);
+        }
+
+        let mut physical = unsafe { std::mem::zeroed::<COREWEBVIEW2_PHYSICAL_KEY_STATUS>() };
+        unsafe {
+            let _ = args.PhysicalKeyStatus(&mut physical);
+        }
+
+        let ctrl = unsafe { GetKeyState(0x11) } < 0;
+        let alt = unsafe { GetKeyState(0x12) } < 0;
+        let shift = unsafe { GetKeyState(0x10) } < 0;
+
+        if handle_shortcut(&state, virtual_key, physical.ScanCode, ctrl, alt, shift) {
+            unsafe {
+                let _ = args.SetHandled(true);
+            }
+        }
+
+        Ok(())
+    }));
+
+    unsafe {
+        if let Err(error) = controller.add_AcceleratorKeyPressed(&handler, &mut token) {
+            eprintln!("[shortcut] failed to register accelerator handler: {error}");
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn install_accelerators_for_view(_state: &Rc<RefCell<AppState>>, _webview: &WebView) {}
+
+fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
+    if body.len() > MAX_IPC_BYTES {
+        eprintln!("[ipc] message too large: {} bytes", body.len());
+        return;
+    }
+
+    let Ok(message) = serde_json::from_str::<serde_json::Value>(body) else {
+        eprintln!("[ipc] invalid json");
+        return;
+    };
+
+    match message.get("type").and_then(|value| value.as_str()) {
+        Some("chrome.ready") => {
+            mark("chrome-ready");
+            state.borrow_mut().ready = true;
+            send_app_info(state);
+            push_ui_state(state);
+        }
+        Some("nav.go") => {
+            if let Some(url) = message.get("url").and_then(|value| value.as_str()) {
+                let _ = state
+                    .borrow()
+                    .proxy
+                    .send_event(AppEvent::Navigate(url.to_owned()));
+            }
+        }
+        Some("nav.back") => go_back_active(state),
+        Some("nav.forward") => go_forward_active(state),
+        Some("nav.reload") => reload_active(state),
+        Some("nav.stop") => stop_active(state),
+        Some("nav.retry") => reload_active(state),
+        Some("tabs.new") => {
+            let _ = state.borrow().proxy.send_event(AppEvent::NewTab);
+        }
+        Some("tabs.reopen") => {
+            let _ = state.borrow().proxy.send_event(AppEvent::Reopen);
+        }
+        Some("tabs.close") => {
+            if let Some(id) = message.get("id").and_then(|value| value.as_u64()) {
+                let _ = state.borrow().proxy.send_event(AppEvent::Close(TabId(id)));
+            }
+        }
+        Some("tabs.activate") => {
+            if let Some(id) = message.get("id").and_then(|value| value.as_u64()) {
+                let _ = state
+                    .borrow()
+                    .proxy
+                    .send_event(AppEvent::Activate(TabId(id)));
+            }
+        }
+        Some(other) => eprintln!("[ipc] unknown message: {other}"),
+        None => eprintln!("[ipc] missing type"),
+    }
+}
+
+fn create_chrome(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
+    let (width, window) = {
+        let state = state.borrow();
+        (state.width, state.window.clone())
+    };
+
+    let mut context = state
+        .borrow_mut()
+        .context
+        .take()
+        .expect("WebContext must exist while creating chrome");
+
+    let ipc_state = Rc::clone(state);
+    let result = WebViewBuilder::new_with_web_context(&mut context)
+        .with_bounds(rect(0, 0, width, CHROME_COLLAPSED))
+        .with_browser_accelerator_keys(false)
+        .with_custom_protocol("rustle".into(), protocol_handler)
+        .with_url(CHROME_URL)
+        .with_ipc_handler(move |request| handle_ipc(&ipc_state, request.body()))
+        .build_as_child(window.as_ref());
+
+    state.borrow_mut().context = Some(context);
+    let chrome = result?;
+    state.borrow_mut().chrome = Some(chrome);
+
+    {
+        let state_ref = state.borrow();
+        if let Some(chrome) = &state_ref.chrome {
+            install_accelerators_for_view(state, chrome);
+        }
+    }
+
+    apply_layout(state);
+    raise_chrome(state);
+    Ok(())
+}
+
 fn main() -> wry::Result<()> {
     START.get_or_init(Instant::now);
     mark("process");
@@ -745,94 +1400,37 @@ fn main() -> wry::Result<()> {
     let event_loop = EventLoopBuilder::<AppEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
-    let window = WindowBuilder::new()
-        .with_title("Rustle")
-        .with_inner_size(TaoLogicalSize::new(1280.0, 800.0))
-        .with_min_inner_size(TaoLogicalSize::new(720.0, 480.0))
-        .with_visible(false)
-        .build(&event_loop)
-        .expect("create window");
+    let window = Rc::new(
+        WindowBuilder::new()
+            .with_title("Rustle")
+            .with_inner_size(TaoLogicalSize::new(1280.0, 800.0))
+            .with_min_inner_size(TaoLogicalSize::new(720.0, 480.0))
+            .with_visible(false)
+            .build(&event_loop)
+            .expect("create window"),
+    );
     mark("window");
 
     let size = window.inner_size().to_logical::<u32>(window.scale_factor());
-    let state = Rc::new(RefCell::new(AppState::new(size.width, size.height)));
+    let context = WebContext::new(Some(data_directory()));
+    let state = Rc::new(RefCell::new(AppState::new(
+        window.clone(),
+        context,
+        size.width,
+        size.height,
+        proxy.clone(),
+    )));
 
-    let mut context = WebContext::new(Some(data_directory()));
-    let new_window_proxy = proxy.clone();
+    restore_session(&state, rustle_storage::load_session());
 
-    let content = {
-        let navigation_state = Rc::clone(&state);
-        let title_state = Rc::clone(&state);
-        let load_state = Rc::clone(&state);
-
-        WebViewBuilder::new_with_web_context(&mut context)
-            .with_bounds(rect(
-                0,
-                CHROME_COLLAPSED,
-                size.width,
-                size.height.saturating_sub(CHROME_COLLAPSED),
-            ))
-            .with_browser_accelerator_keys(false)
-            .with_custom_protocol("rustle".into(), protocol_handler)
-            .with_navigation_handler(move |url| {
-                if url.starts_with("rustle://localhost/chrome") {
-                    return true;
-                }
-                {
-                    let mut state = navigation_state.borrow_mut();
-                    state.url = url;
-                    state.title.clear();
-                    state.loading = true;
-                    state.error = None;
-                }
-                push_ui_state(&navigation_state);
-                true
-            })
-            .with_document_title_changed_handler(move |title| {
-                {
-                    let mut state = title_state.borrow_mut();
-                    if state.error.is_none() {
-                        state.title = title;
-                    }
-                }
-                push_ui_state(&title_state);
-            })
-            .with_on_page_load_handler(move |event, _url| {
-                match event {
-                    PageLoadEvent::Started => {
-                        load_state.borrow_mut().loading = true;
-                    }
-                    PageLoadEvent::Finished => {
-                        sync_from_content(&load_state);
-                        load_state.borrow_mut().loading = false;
-                    }
-                }
-                push_ui_state(&load_state);
-            })
-            .with_new_window_req_handler(move |url, _features| {
-                let _ = new_window_proxy.send_event(AppEvent::OpenUrl(url));
-                NewWindowResponse::Deny
-            })
-            .with_url(NEWTAB_URL)
-            .build_as_child(&window)?
-    };
+    let active = state.borrow().active;
+    ensure_tab_webview(&state, active);
     mark("content");
-    state.borrow_mut().content = Some(content);
 
-    let ipc_state = Rc::clone(&state);
-    let chrome = WebViewBuilder::new_with_web_context(&mut context)
-        .with_bounds(rect(0, 0, size.width, CHROME_COLLAPSED))
-        .with_browser_accelerator_keys(false)
-        .with_custom_protocol("rustle".into(), protocol_handler)
-        .with_url(CHROME_URL)
-        .with_ipc_handler(move |request| handle_ipc(&ipc_state, request.body()))
-        .build_as_child(&window)?;
+    create_chrome(&state)?;
     mark("chrome");
-    state.borrow_mut().chrome = Some(chrome);
 
-    install_navigation_handler(&state, proxy.clone());
-    install_accelerators(&state);
-
+    save_session_state(&state, false);
     if state.borrow().ready {
         send_app_info(&state);
         push_ui_state(&state);
@@ -842,61 +1440,49 @@ fn main() -> wry::Result<()> {
     mark("visible");
 
     event_loop.run(move |event, _, control_flow| {
-        let _ = &context;
         *control_flow = ControlFlow::Wait;
 
         match event {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => {
+                    save_session_state(&state, true);
                     *control_flow = ControlFlow::Exit;
                 }
                 WindowEvent::Resized(size) => {
                     let logical = size.to_logical::<u32>(window.scale_factor());
-                    let mut state = state.borrow_mut();
-                    state.width = logical.width;
-                    state.height = logical.height;
-
-                    let error_mode = state.error.is_some();
-                    if error_mode {
-                        state.chrome_height = state.height;
+                    {
+                        let mut state = state.borrow_mut();
+                        state.width = logical.width;
+                        state.height = logical.height;
                     }
-
-                    let chrome_height = state.chrome_height;
-                    if let Some(chrome) = &state.chrome {
-                        let _ = chrome.set_bounds(rect(0, 0, logical.width, chrome_height));
-                    }
-                    if let Some(content) = &state.content {
-                        if error_mode {
-                            let _ = content.set_visible(false);
-                        } else {
-                            let _ = content.set_visible(true);
-                            let _ = content.set_bounds(rect(
-                                0,
-                                CHROME_COLLAPSED,
-                                logical.width,
-                                logical.height.saturating_sub(CHROME_COLLAPSED),
-                            ));
-                        }
-                    }
+                    apply_layout(&state);
                 }
                 _ => {}
             },
             Event::UserEvent(AppEvent::OpenUrl(url)) => {
-                navigate_to_url(&state, url);
+                open_tab(&state, url);
             }
-            Event::UserEvent(AppEvent::Title(title)) => {
-                let accepted = {
-                    let mut state = state.borrow_mut();
-                    if state.error.is_none() && !title.is_empty() {
-                        state.title = title;
-                        true
-                    } else {
-                        false
-                    }
-                };
-                if accepted {
-                    push_ui_state(&state);
-                }
+            Event::UserEvent(AppEvent::NewTab) => {
+                new_tab(&state);
+            }
+            Event::UserEvent(AppEvent::Activate(id)) => {
+                activate_tab(&state, id);
+            }
+            Event::UserEvent(AppEvent::Close(id)) => {
+                close_tab(&state, id);
+            }
+            Event::UserEvent(AppEvent::Reopen) => {
+                reopen_closed_tab(&state);
+            }
+            Event::UserEvent(AppEvent::Navigate(input)) => {
+                navigate_active(&state, &input);
+            }
+            Event::UserEvent(AppEvent::Title(tab_id, title)) => {
+                on_title(&state, tab_id, title);
+            }
+            Event::UserEvent(AppEvent::Exit) => {
+                save_session_state(&state, true);
+                *control_flow = ControlFlow::Exit;
             }
             _ => {}
         }

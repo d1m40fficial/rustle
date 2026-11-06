@@ -8,6 +8,8 @@
   };
 
   let current = {
+    tabs: [],
+    activeId: 0,
     url: "rustle://newtab",
     displayUrl: "rustle://newtab",
     title: "Новая вкладка",
@@ -19,7 +21,11 @@
 
   const byId = (id) => document.getElementById(id);
 
-  const initialFor = (url) => {
+  const initialFor = (tab) => {
+    if (tab.error) {
+      return "!";
+    }
+    const url = tab.url || "";
     if (!url || url.startsWith("rustle://")) {
       return "R";
     }
@@ -31,17 +37,56 @@
     }
   };
 
+  const renderTabs = (tabs, activeId) => {
+    const container = byId("tabs");
+    container.replaceChildren();
+
+    tabs.forEach((tab) => {
+      const element = document.createElement("div");
+      element.className =
+        "tab" +
+        (tab.id === activeId ? " tab--active" : "") +
+        (tab.loading ? " tab--loading" : "");
+      element.dataset.id = String(tab.id);
+      element.setAttribute("role", "tab");
+      element.setAttribute("aria-selected", String(tab.id === activeId));
+      element.tabIndex = tab.id === activeId ? 0 : -1;
+      element.title = tab.title || "Вкладка";
+
+      const favicon = document.createElement("span");
+      favicon.className = "tab__favicon";
+      favicon.textContent = initialFor(tab);
+
+      const spinner = document.createElement("span");
+      spinner.className = "tab__spinner";
+      spinner.setAttribute("aria-hidden", "true");
+
+      const title = document.createElement("span");
+      title.className = "tab__title";
+      title.textContent = tab.title || "Вкладка";
+
+      const close = document.createElement("button");
+      close.className = "tab__close";
+      close.type = "button";
+      close.dataset.close = String(tab.id);
+      close.title = "Закрыть вкладку";
+      close.setAttribute("aria-label", "Закрыть вкладку");
+      close.textContent = "×";
+
+      element.append(favicon, spinner, title, close);
+      container.append(element);
+    });
+  };
+
   const applyState = (payload) => {
     if (!payload || typeof payload !== "object") {
       return;
     }
     current = { ...current, ...payload };
 
-    const title = payload.title || "Rustle";
-    byId("tab-title").textContent = title;
-    byId("tab").title = title;
-    byId("tab-favicon").textContent = initialFor(payload.url);
+    renderTabs(payload.tabs || [], payload.activeId || 0);
 
+    const title = payload.title || "Rustle";
     const address = byId("address");
     if (document.activeElement !== address) {
       address.value = payload.displayUrl || payload.url || "";
@@ -66,6 +111,8 @@
       byId("error-url").textContent = payload.displayUrl || payload.url || "";
       byId("error-back").disabled = !payload.canGoBack;
     }
+
+    document.title = title;
   };
 
   window.rustle = {
@@ -76,7 +123,7 @@
       if (message.type === "app.info") {
         const about = byId("about");
         if (about) {
-          about.textContent = "M1 · " + message.version;
+          about.textContent = "M2 · " + message.version;
           about.title = "Rustle " + message.version + " (" + message.platform + ")";
         }
       } else if (message.type === "state") {
@@ -107,6 +154,41 @@
       });
     });
 
+    const tabs = byId("tabs");
+    tabs.addEventListener("click", (event) => {
+      const close = event.target.closest("[data-close]");
+      if (close) {
+        event.stopPropagation();
+        send({ type: "tabs.close", id: Number(close.dataset.close) });
+        return;
+      }
+      const tab = event.target.closest(".tab");
+      if (tab) {
+        send({ type: "tabs.activate", id: Number(tab.dataset.id) });
+      }
+    });
+    tabs.addEventListener("auxclick", (event) => {
+      if (event.button !== 1) {
+        return;
+      }
+      const tab = event.target.closest(".tab");
+      if (tab) {
+        event.preventDefault();
+        send({ type: "tabs.close", id: Number(tab.dataset.id) });
+      }
+    });
+    tabs.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        const tab = event.target.closest(".tab");
+        if (tab) {
+          event.preventDefault();
+          send({ type: "tabs.activate", id: Number(tab.dataset.id) });
+        }
+      }
+    });
+
+    byId("new-tab").addEventListener("click", () => send({ type: "tabs.new" }));
+
     const go = byId("go");
     if (go) {
       go.addEventListener("click", () => {
@@ -124,16 +206,6 @@
     const errorBack = byId("error-back");
     if (errorBack) {
       errorBack.addEventListener("click", () => send({ type: "nav.back" }));
-    }
-
-    const toggle = byId("overlay-toggle");
-    if (toggle) {
-      toggle.addEventListener("click", () => send({ type: "ui.toggleOverlay" }));
-    }
-
-    const close = byId("overlay-close");
-    if (close) {
-      close.addEventListener("click", () => send({ type: "ui.toggleOverlay" }));
     }
 
     send({ type: "chrome.ready" });

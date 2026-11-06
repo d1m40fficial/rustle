@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 rustle-core.workspace = true
+rustle-storage.workspace = true
 rustle-ui.workspace = true
 serde_json.workspace = true
 tao.workspace = true

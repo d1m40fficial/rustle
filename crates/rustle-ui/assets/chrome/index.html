@@ -8,17 +8,10 @@
 </head>
 <body>
   <div class="tabs" role="tablist" aria-label="Вкладки">
-    <div class="tab tab--active" id="tab" role="tab" aria-selected="true" tabindex="0">
-      <span class="tab__favicon" id="tab-favicon">R</span>
-      <span class="tab__spinner" aria-hidden="true"></span>
-      <span class="tab__title" id="tab-title">Новая вкладка</span>
-    </div>
-    <button class="tab-new" type="button" title="Новая вкладка (Ctrl+T)" aria-label="Новая вкладка">+</button>
+    <div class="tabs__items" id="tabs"></div>
+    <button class="tab-new" type="button" id="new-tab" title="Новая вкладка (Ctrl+T)" aria-label="Новая вкладка">+</button>
     <span class="tabs__spacer"></span>
-    <span class="build-badge" id="about" title="Версия">M1</span>
-    <button class="chrome-btn" type="button" id="overlay-toggle" title="Проверка перекрытия" aria-label="Проверка перекрытия">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </button>
+    <span class="build-badge" id="about" title="Версия">M2</span>
   </div>
 
   <div class="toolbar" role="toolbar" aria-label="Навигация">
@@ -60,15 +53,6 @@
         <button class="button button--primary" type="button" id="error-retry">Повторить</button>
         <button class="button" type="button" id="error-back">Назад</button>
       </div>
-    </div>
-  </section>
-
-  <section class="overlay" id="overlay" aria-label="Проверка перекрытия">
-    <div class="overlay__card">
-      <p class="overlay__eyebrow">M1 · spike</p>
-      <h1 class="overlay__title">Chrome поверх контента</h1>
-      <p class="overlay__text">Если вы видите эту панель, chrome WebView перекрывает content WebView и z-order работает. Это база для выпадающих подсказок адресной строки.</p>
-      <button class="overlay__button" type="button" id="overlay-close">Свернуть</button>
     </div>
   </section>
 
