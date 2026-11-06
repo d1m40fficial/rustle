@@ -717,6 +717,16 @@
       });
     }
 
+    const clearData = byId("clear-data");
+    if (clearData) {
+      clearData.addEventListener("click", () => {
+        if (window.confirm("Очистить cookies и кэш WebView2?")) {
+          send({ type: "data.clear" });
+          byId("settings-status").textContent = "Очищено";
+        }
+      });
+    }
+
     const retry = byId("error-retry");
     if (retry) {
       retry.addEventListener("click", () => send({ type: "nav.retry" }));

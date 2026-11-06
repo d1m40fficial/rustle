@@ -2,7 +2,7 @@
 
 use std::sync::mpsc::{self, Sender};
 
-use rustle_storage::Storage;
+use rustle_storage::{DownloadRecord, Storage};
 use serde_json::{Value, json};
 use tao::event_loop::EventLoopProxy;
 
@@ -12,6 +12,13 @@ pub enum StorageCommand {
     RecordVisit {
         url: String,
         title: String,
+    },
+    SaveDownload(DownloadRecord),
+    UpdateDownload {
+        id: i64,
+        received: i64,
+        total: i64,
+        state: String,
     },
     Query {
         request_id: u64,
@@ -44,12 +51,37 @@ fn run(proxy: EventLoopProxy<AppEvent>, receiver: mpsc::Receiver<StorageCommand>
         }
     };
 
+    if let Some(storage) = &storage {
+        if let Ok(items) = storage.downloads() {
+            let _ = proxy.send_event(AppEvent::DownloadsRestored(items));
+        }
+    }
+
     while let Ok(command) = receiver.recv() {
         match command {
             StorageCommand::RecordVisit { url, title } => {
                 if let Some(storage) = &storage {
                     if let Err(error) = storage.record_visit(&url, &title) {
                         eprintln!("[storage] record visit failed: {error}");
+                    }
+                }
+            }
+            StorageCommand::SaveDownload(record) => {
+                if let Some(storage) = &storage {
+                    if let Err(error) = storage.save_download(&record) {
+                        eprintln!("[storage] save download failed: {error}");
+                    }
+                }
+            }
+            StorageCommand::UpdateDownload {
+                id,
+                received,
+                total,
+                state,
+            } => {
+                if let Some(storage) = &storage {
+                    if let Err(error) = storage.update_download(id, received, total, &state) {
+                        eprintln!("[storage] update download failed: {error}");
                     }
                 }
             }

@@ -16,7 +16,7 @@ use std::{
 };
 
 use rustle_core::{ErrorInfo, TabId, VERSION, display_url, resolve_input, search_url};
-use rustle_storage::{SESSION_VERSION, Session, SessionTab, Settings};
+use rustle_storage::{DownloadRecord, SESSION_VERSION, Session, SessionTab, Settings};
 use rustle_ui::{CSP, asset, mime_type};
 use serde_json::{Value, json};
 use storage_worker::{StorageCommand, StorageQuery};
@@ -38,10 +38,12 @@ use wry::{WebViewBuilderExtWindows, WebViewExtWindows};
 
 #[cfg(target_os = "windows")]
 use webview2_com::{
-    BytesReceivedChangedEventHandler, DownloadStartingEventHandler,
+    BytesReceivedChangedEventHandler, ClearBrowsingDataCompletedHandler,
+    DownloadStartingEventHandler,
     Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED, COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS,
-        COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED, ICoreWebView2_4, ICoreWebView2DownloadOperation,
+        COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED, ICoreWebView2_4, ICoreWebView2_13,
+        ICoreWebView2DownloadOperation, ICoreWebView2Profile2,
     },
     StateChangedEventHandler,
 };
@@ -66,6 +68,7 @@ enum AppEvent {
     OpenUrl(String),
     StorageResponse { request_id: u64, payload: Value },
     DownloadsChanged,
+    DownloadsRestored(Vec<DownloadRecord>),
     Focus,
     NewTab,
     Activate(TabId),
@@ -1637,19 +1640,34 @@ fn update_download(
     total: i64,
     status: &str,
 ) {
-    if let Some(download) = state
-        .borrow_mut()
-        .downloads
-        .iter_mut()
-        .find(|download| download.id == id)
-    {
-        download.received = received;
-        if total > 0 {
-            download.total = total;
+    let updated = {
+        let mut state = state.borrow_mut();
+        if let Some(download) = state
+            .downloads
+            .iter_mut()
+            .find(|download| download.id == id)
+        {
+            download.received = received;
+            if total > 0 {
+                download.total = total;
+            }
+            download.state = status.to_owned();
+            true
+        } else {
+            false
         }
-        download.state = status.to_owned();
+    };
+    if updated {
+        if let Some(storage) = &state.borrow().storage {
+            let _ = storage.send(StorageCommand::UpdateDownload {
+                id: id as i64,
+                received,
+                total,
+                state: status.to_owned(),
+            });
+        }
+        let _ = state.borrow().proxy.send_event(AppEvent::DownloadsChanged);
     }
-    let _ = state.borrow().proxy.send_event(AppEvent::DownloadsChanged);
 }
 
 #[cfg(target_os = "windows")]
@@ -1765,6 +1783,21 @@ fn install_download_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, _t
             });
             id
         };
+        if let Some(storage) = &state.borrow().storage {
+            let created_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_secs() as i64)
+                .unwrap_or(0);
+            let _ = storage.send(StorageCommand::SaveDownload(DownloadRecord {
+                id: id as i64,
+                url: url.clone(),
+                path: path.to_string_lossy().into_owned(),
+                received: 0,
+                total: 0,
+                state: "progress".to_owned(),
+                created_at,
+            }));
+        }
         install_download_operation_handlers(&state, &operation, id);
         let _ = state.borrow().proxy.send_event(AppEvent::DownloadsChanged);
         Ok(())
@@ -1778,6 +1811,34 @@ fn install_download_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, _t
 
 #[cfg(not(target_os = "windows"))]
 fn install_download_handler(_state: &Rc<RefCell<AppState>>, _webview: &WebView, _tab_id: TabId) {}
+
+#[cfg(target_os = "windows")]
+fn clear_browsing_data(state: &Rc<RefCell<AppState>>) {
+    let webview = state
+        .borrow()
+        .chrome
+        .as_ref()
+        .map(|chrome| chrome.webview().clone());
+    let Some(webview) = webview else {
+        return;
+    };
+    let Ok(webview13) = webview.cast::<ICoreWebView2_13>() else {
+        return;
+    };
+    let Ok(profile) = (unsafe { webview13.Profile() }) else {
+        return;
+    };
+    let Ok(profile2) = profile.cast::<ICoreWebView2Profile2>() else {
+        return;
+    };
+    let handler = ClearBrowsingDataCompletedHandler::create(Box::new(|_result| Ok(())));
+    unsafe {
+        let _ = profile2.ClearBrowsingDataAll(&handler);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn clear_browsing_data(_state: &Rc<RefCell<AppState>>) {}
 
 fn storage_query(state: &Rc<RefCell<AppState>>, request_id: u64, query: StorageQuery) {
     if let Some(storage) = &state.borrow().storage {
@@ -1959,9 +2020,11 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 apply_layout(state);
             }
         }
+        Some("data.clear") => clear_browsing_data(state),
         Some("downloads.cancel") => {
             if let Some(id) = message.get("id").and_then(|value| value.as_u64()) {
                 let mut cancelled = false;
+                let mut progress = (0, 0);
                 {
                     let mut state = state.borrow_mut();
                     if let Some(download) = state.downloads.iter_mut().find(|d| d.id == id) {
@@ -1972,7 +2035,18 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                             }
                         }
                         download.state = "cancelled".to_owned();
+                        progress = (download.received, download.total);
                         cancelled = true;
+                    }
+                }
+                if cancelled {
+                    if let Some(storage) = &state.borrow().storage {
+                        let _ = storage.send(StorageCommand::UpdateDownload {
+                            id: id as i64,
+                            received: progress.0,
+                            total: progress.1,
+                            state: "cancelled".to_owned(),
+                        });
                     }
                 }
                 if cancelled {
@@ -2219,6 +2293,32 @@ fn main() -> wry::Result<()> {
                 }
             }
             Event::UserEvent(AppEvent::DownloadsChanged) => {
+                push_ui_state(&state);
+            }
+            Event::UserEvent(AppEvent::DownloadsRestored(records)) => {
+                {
+                let mut state = state.borrow_mut();
+                state.downloads = records
+                    .into_iter()
+                    .map(|record| DownloadEntry {
+                        id: record.id as u64,
+                        url: record.url,
+                        path: record.path,
+                        received: record.received,
+                        total: record.total,
+                        state: record.state,
+                        #[cfg(target_os = "windows")]
+                        operation: None,
+                    })
+                    .collect();
+                state.next_download_id = state
+                    .downloads
+                    .iter()
+                    .map(|download| download.id)
+                    .max()
+                    .unwrap_or(0)
+                    + 1;
+                }
                 push_ui_state(&state);
             }
             Event::UserEvent(AppEvent::Exit) => {

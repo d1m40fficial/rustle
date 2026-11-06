@@ -25,6 +25,17 @@ pub struct HistoryEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DownloadRecord {
+    pub id: i64,
+    pub url: String,
+    pub path: String,
+    pub received: i64,
+    pub total: i64,
+    pub state: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BookmarkEntry {
     pub id: i64,
     pub url: String,
@@ -205,6 +216,16 @@ impl Storage {
              );
              CREATE INDEX IF NOT EXISTS idx_bookmarks_created ON bookmarks(created_at DESC);
 
+             CREATE TABLE IF NOT EXISTS downloads (
+                id          INTEGER PRIMARY KEY,
+                url         TEXT NOT NULL,
+                path        TEXT NOT NULL,
+                received    INTEGER NOT NULL DEFAULT 0,
+                total       INTEGER NOT NULL DEFAULT 0,
+                state       TEXT NOT NULL,
+                created_at  INTEGER NOT NULL
+             );
+
              CREATE TABLE IF NOT EXISTS meta (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -283,6 +304,64 @@ impl Storage {
     pub fn clear_history(&self) -> StorageResult<()> {
         self.conn.execute("DELETE FROM history", [])?;
         Ok(())
+    }
+
+    pub fn save_download(&self, record: &DownloadRecord) -> StorageResult<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO downloads (id, url, path, received, total, state, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                record.id,
+                record.url,
+                record.path,
+                record.received,
+                record.total,
+                record.state,
+                record.created_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_download(
+        &self,
+        id: i64,
+        received: i64,
+        total: i64,
+        state: &str,
+    ) -> StorageResult<()> {
+        self.conn.execute(
+            "UPDATE downloads SET received = ?1, total = ?2, state = ?3 WHERE id = ?4",
+            params![received, total, state, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn downloads(&self) -> StorageResult<Vec<DownloadRecord>> {
+        self.conn.execute(
+            "UPDATE downloads SET state = 'interrupted' WHERE state = 'progress'",
+            [],
+        )?;
+        let mut statement = self.conn.prepare(
+            "SELECT id, url, path, received, total, state, created_at
+             FROM downloads ORDER BY created_at DESC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(DownloadRecord {
+                id: row.get(0)?,
+                url: row.get(1)?,
+                path: row.get(2)?,
+                received: row.get(3)?,
+                total: row.get(4)?,
+                state: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        })?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
     }
 
     pub fn bookmarks(&self) -> StorageResult<Vec<BookmarkEntry>> {
