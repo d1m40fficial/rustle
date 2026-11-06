@@ -1,6 +1,7 @@
 //! Rustle M2.1: tabs, session restore, new-tab overlay and single instance.
 
 mod single_instance;
+mod storage_worker;
 
 use std::{
     borrow::Cow,
@@ -8,13 +9,15 @@ use std::{
     path::PathBuf,
     rc::Rc,
     sync::OnceLock,
+    sync::mpsc::Sender,
     time::{Duration, Instant},
 };
 
-use rustle_core::{ErrorInfo, TabId, VERSION, display_url, resolve_input};
-use rustle_storage::{SESSION_VERSION, Session, SessionTab};
+use rustle_core::{ErrorInfo, TabId, VERSION, display_url, resolve_input, search_url};
+use rustle_storage::{SESSION_VERSION, Session, SessionTab, Settings};
 use rustle_ui::{CSP, asset, mime_type};
 use serde_json::{Value, json};
+use storage_worker::{StorageCommand, StorageQuery};
 use tao::{
     dpi::LogicalSize as TaoLogicalSize,
     event::{Event, WindowEvent},
@@ -47,6 +50,7 @@ fn mark(label: &str) {
 #[derive(Debug)]
 enum AppEvent {
     OpenUrl(String),
+    StorageResponse { request_id: u64, payload: Value },
     Focus,
     NewTab,
     Activate(TabId),
@@ -67,6 +71,7 @@ struct Tab {
     error: Option<ErrorInfo>,
     webview: Option<WebView>,
     nav_id: u64,
+    return_url: Option<String>,
 }
 
 impl Tab {
@@ -81,6 +86,7 @@ impl Tab {
             error: None,
             webview: None,
             nav_id: 0,
+            return_url: None,
         }
     }
 }
@@ -105,6 +111,10 @@ struct AppState {
     proxy: EventLoopProxy<AppEvent>,
     last_save: Instant,
     stress_cycles: Option<u32>,
+    settings: Settings,
+    storage: Option<Sender<StorageCommand>>,
+    dropdown_open: bool,
+    dropdown_height: u32,
 }
 
 impl AppState {
@@ -129,6 +139,10 @@ impl AppState {
             proxy,
             last_save: Instant::now(),
             stress_cycles: None,
+            settings: Settings::default(),
+            storage: None,
+            dropdown_open: false,
+            dropdown_height: 360,
         }
     }
 
@@ -199,14 +213,50 @@ fn canonicalize_internal(url: String) -> String {
     let trimmed = url.trim_end_matches('/');
     if trimmed == "rustle://newtab" || url.contains("rustle.localhost/newtab") {
         NEWTAB_URL.to_owned()
+    } else if let Some(page) = internal_page(&url) {
+        format!("rustle://{page}")
     } else {
         url
     }
 }
 
+fn internal_page(url: &str) -> Option<&'static str> {
+    let internal = url.starts_with("rustle://") || url.contains("rustle.localhost/");
+    if !internal {
+        return None;
+    }
+    if url.contains("history") {
+        Some("history")
+    } else if url.contains("bookmarks") {
+        Some("bookmarks")
+    } else if url.contains("settings") {
+        Some("settings")
+    } else if url.contains("about") {
+        Some("about")
+    } else {
+        None
+    }
+}
+
+fn internal_title(page: &str) -> &'static str {
+    match page {
+        "history" => "История",
+        "bookmarks" => "Закладки",
+        "settings" => "Настройки",
+        "about" => "О Rustle",
+        _ => "Rustle",
+    }
+}
+
+fn is_overlay_url(url: &str) -> bool {
+    is_newtab_url(url) || internal_page(url).is_some()
+}
+
 fn session_url(url: &str) -> String {
     if url.starts_with("rustle://newtab") || url.contains("rustle.localhost/newtab") {
         NEWTAB_URL.to_owned()
+    } else if let Some(page) = internal_page(url) {
+        format!("rustle://{page}")
     } else {
         url.to_owned()
     }
@@ -225,8 +275,14 @@ fn newtab_overlay(state: &AppState) -> bool {
 }
 
 fn fallback_title(url: &str) -> String {
-    if url.starts_with("rustle://") || url.contains("rustle.localhost") {
+    if is_newtab_url(url) {
         return "Новая вкладка".to_owned();
+    }
+    if let Some(page) = internal_page(url) {
+        return internal_title(page).to_owned();
+    }
+    if url.starts_with("rustle://") || url.contains("rustle.localhost") {
+        return "Rustle".to_owned();
     }
     Url::parse(url)
         .ok()
@@ -370,12 +426,22 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                 )
             });
 
-        let mode = if error.is_some() {
-            "error"
+        let (mode, internal_page_name, overlay_back) = if error.is_some() {
+            ("error", "", false)
         } else if active.is_some_and(|tab| tab.webview.is_none() && is_newtab_url(&tab.url)) {
-            "newtab"
+            (
+                "newtab",
+                "",
+                active.is_some_and(|tab| tab.return_url.is_some()),
+            )
+        } else if let Some(page) = active.and_then(|tab| internal_page(&tab.url)) {
+            (
+                "internal",
+                page,
+                active.is_some_and(|tab| tab.return_url.is_some()),
+            )
         } else {
-            "web"
+            ("web", "", false)
         };
 
         let payload = json!({
@@ -385,10 +451,17 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
             "displayUrl": display_url(&url),
             "title": title,
             "loading": loading,
-            "canGoBack": can_back,
-            "canGoForward": can_forward,
+            "canGoBack": if mode == "web" || mode == "error" { can_back } else { overlay_back },
+            "canGoForward": if mode == "web" || mode == "error" { can_forward } else { false },
             "error": error,
             "mode": mode,
+            "internalPage": internal_page_name,
+            "theme": if state.settings.theme == "light" { "light" } else { "dark" },
+            "settings": {
+                "searchEngine": state.settings.search_engine,
+                "theme": state.settings.theme,
+                "startup": state.settings.startup,
+            },
         });
 
         let window_title = if title == "Новая вкладка" || title == "Rustle" {
@@ -515,15 +588,25 @@ fn raise_chrome(state: &Rc<RefCell<AppState>>) {
 }
 
 fn apply_layout(state: &Rc<RefCell<AppState>>) {
-    let (width, height, active, overlay_mode) = {
+    let (width, height, active, overlay_mode, dropdown_open, dropdown_height) = {
         let state = state.borrow();
-        let overlay_mode =
-            state.active_tab().is_some_and(|tab| tab.error.is_some()) || newtab_overlay(&state);
-        (state.width, state.height, state.active, overlay_mode)
+        let overlay_mode = state.active_tab().is_some_and(|tab| {
+            tab.error.is_some() || newtab_overlay(&state) || internal_page(&tab.url).is_some()
+        });
+        (
+            state.width,
+            state.height,
+            state.active,
+            overlay_mode,
+            state.dropdown_open,
+            state.dropdown_height,
+        )
     };
 
     let chrome_height = if overlay_mode {
         height
+    } else if dropdown_open {
+        dropdown_height.clamp(CHROME_COLLAPSED, height)
     } else {
         CHROME_COLLAPSED
     };
@@ -569,12 +652,21 @@ fn focus_address(state: &Rc<RefCell<AppState>>) {
 }
 
 fn focus_active_content(state: &Rc<RefCell<AppState>>) {
-    let overlay = {
+    let (overlay, newtab) = {
         let state = state.borrow();
-        state.active_tab().is_some_and(|tab| tab.error.is_some()) || newtab_overlay(&state)
+        let newtab = newtab_overlay(&state);
+        let overlay = state
+            .active_tab()
+            .is_some_and(|tab| tab.error.is_some() || internal_page(&tab.url).is_some())
+            || newtab;
+        (overlay, newtab)
     };
     if overlay {
-        focus_address(state);
+        if newtab {
+            focus_address(state);
+        } else if let Some(chrome) = &state.borrow().chrome {
+            let _ = chrome.focus();
+        }
         return;
     }
     let state = state.borrow();
@@ -608,14 +700,33 @@ fn on_navigation(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: String) {
     save_session_due(state);
 }
 
+fn record_visit(state: &Rc<RefCell<AppState>>, url: &str, title: &str) {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return;
+    }
+    if let Some(storage) = &state.borrow().storage {
+        let _ = storage.send(StorageCommand::RecordVisit {
+            url: url.to_owned(),
+            title: title.to_owned(),
+        });
+    }
+}
+
 fn on_title(state: &Rc<RefCell<AppState>>, tab_id: TabId, title: String) {
-    {
+    let recorded = {
         let mut state = state.borrow_mut();
-        if let Some(tab) = state.tab_mut(tab_id) {
-            if tab.error.is_none() {
-                tab.title = title;
-            }
+        let Some(tab) = state.tab_mut(tab_id) else {
+            return;
+        };
+        if tab.error.is_some() {
+            None
+        } else {
+            tab.title = title;
+            Some((tab.url.clone(), tab.title.clone()))
         }
+    };
+    if let Some((url, title)) = recorded {
+        record_visit(state, &url, &title);
     }
     push_ui_state(state);
     save_session_due(state);
@@ -645,7 +756,7 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
         let Some(tab) = state.tab(tab_id) else {
             return;
         };
-        if tab.webview.is_some() || is_newtab_url(&tab.url) {
+        if tab.webview.is_some() || is_overlay_url(&tab.url) {
             return;
         }
         (
@@ -732,18 +843,49 @@ fn navigate_active(state: &Rc<RefCell<AppState>>, input: &str) {
     let Some(target) = resolve_input(input) else {
         return;
     };
-    let url = canonicalize_internal(target.into_url());
+    let engine = state.borrow().settings.search_engine.clone();
+    let url = match target {
+        rustle_core::NavigationTarget::Url(url) => canonicalize_internal(url),
+        rustle_core::NavigationTarget::Search { query } => search_url(&engine, &query),
+    };
+
     let active = state.borrow().active;
-    let had_webview = state
-        .borrow()
-        .tab(active)
-        .is_some_and(|tab| tab.webview.is_some());
+    let previous_url = {
+        let state = state.borrow();
+        let Some(tab) = state.tab(active) else {
+            return;
+        };
+        tab.url.clone()
+    };
+
+    if is_overlay_url(&url) {
+        {
+            let mut state = state.borrow_mut();
+            let Some(tab) = state.tab_mut(active) else {
+                return;
+            };
+            if !is_overlay_url(&previous_url) && !previous_url.is_empty() {
+                tab.return_url = Some(previous_url);
+            }
+            tab.url = url.clone();
+            tab.title = fallback_title(&url);
+            tab.loading = false;
+            tab.error = None;
+        }
+
+        apply_layout(state);
+        focus_active_content(state);
+        push_ui_state(state);
+        save_session_state(state, false);
+        return;
+    }
 
     {
         let mut state = state.borrow_mut();
         let Some(tab) = state.tab_mut(active) else {
             return;
         };
+        tab.return_url = None;
         tab.url = url.clone();
         tab.title.clear();
         tab.loading = true;
@@ -751,20 +893,17 @@ fn navigate_active(state: &Rc<RefCell<AppState>>, input: &str) {
     }
 
     ensure_tab_webview(state, active);
-
-    if had_webview {
-        let loaded = {
-            let state = state.borrow();
-            state
-                .tab(active)
-                .and_then(|tab| tab.webview.as_ref())
-                .map(|webview| webview.load_url(&url).is_ok())
-                .unwrap_or(false)
-        };
-        if !loaded {
-            if let Some(tab) = state.borrow_mut().tab_mut(active) {
-                tab.loading = false;
-            }
+    let loaded = {
+        let state = state.borrow();
+        state
+            .tab(active)
+            .and_then(|tab| tab.webview.as_ref())
+            .map(|webview| webview.load_url(&url).is_ok())
+            .unwrap_or(false)
+    };
+    if !loaded {
+        if let Some(tab) = state.borrow_mut().tab_mut(active) {
+            tab.loading = false;
         }
     }
 
@@ -776,19 +915,24 @@ fn navigate_active(state: &Rc<RefCell<AppState>>, input: &str) {
 
 fn reload_active(state: &Rc<RefCell<AppState>>) {
     let active = state.borrow().active;
-    let (url, error, has_webview) = {
+    let (url, error, has_webview, overlay) = {
         let state = state.borrow();
         let Some(tab) = state.tab(active) else {
             return;
         };
-        (tab.url.clone(), tab.error.is_some(), tab.webview.is_some())
+        (
+            tab.url.clone(),
+            tab.error.is_some(),
+            tab.webview.is_some(),
+            is_overlay_url(&tab.url),
+        )
     };
 
     if error {
         navigate_active(state, &url);
         return;
     }
-    if !has_webview {
+    if !has_webview || overlay {
         return;
     }
 
@@ -824,6 +968,21 @@ fn stop_active(state: &Rc<RefCell<AppState>>) {
 
 fn go_back_active(state: &Rc<RefCell<AppState>>) {
     let active = state.borrow().active;
+    let overlay_return = {
+        let state = state.borrow();
+        let Some(tab) = state.tab(active) else {
+            return;
+        };
+        if is_overlay_url(&tab.url) {
+            tab.return_url.clone()
+        } else {
+            None
+        }
+    };
+    if let Some(url) = overlay_return {
+        navigate_active(state, &url);
+        return;
+    }
     if state
         .borrow()
         .tab(active)
@@ -964,8 +1123,16 @@ fn install_tab_navigation_handlers(
             }
 
             sync_tab_from_webview(&state, tab_id);
-            if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
-                tab.loading = false;
+            let visited = {
+                if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+                    tab.loading = false;
+                    Some((tab.url.clone(), tab.title.clone()))
+                } else {
+                    None
+                }
+            };
+            if let Some((url, title)) = visited {
+                record_visit(&state, &url, &title);
             }
             push_ui_state(&state);
 
@@ -1174,7 +1341,13 @@ fn open_external_url(state: &Rc<RefCell<AppState>>, input: &str) {
     let Some(target) = resolve_input(input) else {
         return;
     };
-    open_tab(state, target.into_url());
+    let url = match target {
+        rustle_core::NavigationTarget::Url(url) => canonicalize_internal(url),
+        rustle_core::NavigationTarget::Search { query } => {
+            search_url(&state.borrow().settings.search_engine, &query)
+        }
+    };
+    open_tab(state, url);
 }
 
 fn open_tab(state: &Rc<RefCell<AppState>>, url: String) {
@@ -1347,6 +1520,12 @@ fn install_accelerators_for_view(state: &Rc<RefCell<AppState>>, webview: &WebVie
 #[cfg(not(target_os = "windows"))]
 fn install_accelerators_for_view(_state: &Rc<RefCell<AppState>>, _webview: &WebView) {}
 
+fn storage_query(state: &Rc<RefCell<AppState>>, request_id: u64, query: StorageQuery) {
+    if let Some(storage) = &state.borrow().storage {
+        let _ = storage.send(StorageCommand::Query { request_id, query });
+    }
+}
+
 fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
     if body.len() > MAX_IPC_BYTES {
         eprintln!("[ipc] message too large: {} bytes", body.len());
@@ -1379,12 +1558,12 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
 
             let overlay = {
                 let state = state.borrow();
-                state.active_tab().is_some_and(|tab| {
-                    tab.error.is_some() || (tab.webview.is_none() && is_newtab_url(&tab.url))
-                })
+                state
+                    .active_tab()
+                    .is_some_and(|tab| tab.error.is_some() || is_overlay_url(&tab.url))
             };
             if overlay {
-                focus_address(state);
+                focus_active_content(state);
             }
         }
         Some("nav.go") => {
@@ -1418,6 +1597,129 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                     .proxy
                     .send_event(AppEvent::Activate(TabId(id)));
             }
+        }
+        Some("history.query") => {
+            if let Some(request_id) = message.get("id").and_then(|value| value.as_u64()) {
+                let query = message
+                    .get("query")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("")
+                    .to_owned();
+                let limit = message
+                    .get("limit")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(100) as u32;
+                storage_query(state, request_id, StorageQuery::History { query, limit });
+            }
+        }
+        Some("history.delete") => {
+            if let (Some(request_id), Some(entry_id)) = (
+                message.get("id").and_then(|value| value.as_u64()),
+                message.get("entryId").and_then(|value| value.as_i64()),
+            ) {
+                storage_query(
+                    state,
+                    request_id,
+                    StorageQuery::DeleteHistory { id: entry_id },
+                );
+            }
+        }
+        Some("history.clear") => {
+            if let Some(request_id) = message.get("id").and_then(|value| value.as_u64()) {
+                storage_query(state, request_id, StorageQuery::ClearHistory);
+            }
+        }
+        Some("bookmarks.list") => {
+            if let Some(request_id) = message.get("id").and_then(|value| value.as_u64()) {
+                storage_query(state, request_id, StorageQuery::Bookmarks);
+            }
+        }
+        Some("bookmarks.toggle") => {
+            if let (Some(request_id), Some(url)) = (
+                message.get("id").and_then(|value| value.as_u64()),
+                message.get("url").and_then(|value| value.as_str()),
+            ) {
+                let title = message
+                    .get("title")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or(url)
+                    .to_owned();
+                storage_query(
+                    state,
+                    request_id,
+                    StorageQuery::ToggleBookmark {
+                        url: url.to_owned(),
+                        title,
+                    },
+                );
+            }
+        }
+        Some("bookmarks.remove") => {
+            if let (Some(request_id), Some(entry_id)) = (
+                message.get("id").and_then(|value| value.as_u64()),
+                message.get("entryId").and_then(|value| value.as_i64()),
+            ) {
+                storage_query(
+                    state,
+                    request_id,
+                    StorageQuery::RemoveBookmark { id: entry_id },
+                );
+            }
+        }
+        Some("suggest.query") => {
+            if let Some(request_id) = message.get("id").and_then(|value| value.as_u64()) {
+                let query = message
+                    .get("query")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("")
+                    .to_owned();
+                let limit = message
+                    .get("limit")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(8) as u32;
+                storage_query(state, request_id, StorageQuery::Suggest { query, limit });
+            }
+        }
+        Some("ui.dropdown") => {
+            let open = message
+                .get("open")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            let height = message
+                .get("height")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(360) as u32;
+            let changed = {
+                let mut state = state.borrow_mut();
+                let changed = state.dropdown_open != open || state.dropdown_height != height;
+                state.dropdown_open = open;
+                state.dropdown_height = height;
+                changed
+            };
+            if changed {
+                apply_layout(state);
+            }
+        }
+        Some("settings.save") => {
+            let mut settings = state.borrow().settings.clone();
+            if let Some(value) = message.get("searchEngine").and_then(|value| value.as_str()) {
+                if matches!(value, "ddg" | "google" | "yandex" | "bing") {
+                    settings.search_engine = value.to_owned();
+                }
+            }
+            if let Some(value) = message.get("theme").and_then(|value| value.as_str()) {
+                if matches!(value, "system" | "light" | "dark") {
+                    settings.theme = value.to_owned();
+                }
+            }
+            if let Some(value) = message.get("startup").and_then(|value| value.as_str()) {
+                if matches!(value, "restore" | "newtab") {
+                    settings.startup = value.to_owned();
+                }
+            }
+            let _ = rustle_storage::save_settings(&settings);
+            state.borrow_mut().settings = settings;
+            push_ui_state(state);
         }
         Some(other) => eprintln!("[ipc] unknown message: {other}"),
         None => eprintln!("[ipc] missing type"),
@@ -1503,6 +1805,7 @@ fn main() -> wry::Result<()> {
     });
 
     let size = window.inner_size().to_logical::<u32>(window.scale_factor());
+    let settings = rustle_storage::load_settings();
     let context = WebContext::new(Some(data_directory()));
     let state = Rc::new(RefCell::new(AppState::new(
         window.clone(),
@@ -1512,8 +1815,19 @@ fn main() -> wry::Result<()> {
         proxy.clone(),
     )));
 
-    state.borrow_mut().stress_cycles = stress_cycles;
-    restore_session(&state, rustle_storage::load_session());
+    {
+        let mut state = state.borrow_mut();
+        state.stress_cycles = stress_cycles;
+        state.settings = settings.clone();
+        state.storage = storage_worker::spawn(proxy.clone());
+    }
+
+    let session = if settings.startup == "newtab" {
+        None
+    } else {
+        rustle_storage::load_session()
+    };
+    restore_session(&state, session);
 
     let active = state.borrow().active;
     ensure_tab_webview(&state, active);
@@ -1563,17 +1877,7 @@ fn main() -> wry::Result<()> {
             Event::UserEvent(AppEvent::Focus) => {
                 state.borrow().window.set_visible(true);
                 state.borrow().window.set_focus();
-                let overlay = {
-                    let state = state.borrow();
-                    state.active_tab().is_some_and(|tab| {
-                        tab.error.is_some() || (tab.webview.is_none() && is_newtab_url(&tab.url))
-                    })
-                };
-                if overlay {
-                    focus_address(&state);
-                } else {
-                    focus_active_content(&state);
-                }
+                focus_active_content(&state);
             }
             Event::UserEvent(AppEvent::NewTab) => {
                 new_tab(&state);
@@ -1592,6 +1896,15 @@ fn main() -> wry::Result<()> {
             }
             Event::UserEvent(AppEvent::Title(tab_id, title)) => {
                 on_title(&state, tab_id, title);
+            }
+            Event::UserEvent(AppEvent::StorageResponse { request_id, payload }) => {
+                let script = format!(
+                    "window.rustle && window.rustle.dispatch({{\"type\":\"storage.response\",\"id\":{request_id},\"payload\":{payload}}});"
+                );
+                let state_ref = state.borrow();
+                if let Some(chrome) = &state_ref.chrome {
+                    let _ = chrome.evaluate_script(&script);
+                }
             }
             Event::UserEvent(AppEvent::Exit) => {
                 save_session_state(&state, true);

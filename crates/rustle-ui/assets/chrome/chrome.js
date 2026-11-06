@@ -17,9 +17,108 @@
     canGoBack: false,
     canGoForward: false,
     error: null,
+    mode: "newtab",
+    internalPage: "",
+    theme: "dark",
+    settings: { searchEngine: "ddg", theme: "system", startup: "restore" },
   };
 
+  let currentInternalPage = "";
+  let nextRequestId = 1;
+  const pending = new Map();
+
   const byId = (id) => document.getElementById(id);
+
+  const request = (type, payload = {}) =>
+    new Promise((resolve, reject) => {
+      const id = nextRequestId++;
+      pending.set(id, { resolve, reject });
+      send({ ...payload, type, id });
+    });
+
+  let suggestionItems = [];
+  let suggestionIndex = -1;
+
+  const closeSuggestions = () => {
+    const panel = byId("suggestions");
+    if (!panel) {
+      return;
+    }
+    if (!panel.hidden) {
+      panel.hidden = true;
+      send({ type: "ui.dropdown", open: false });
+    }
+    suggestionItems = [];
+    suggestionIndex = -1;
+  };
+
+  const chooseSuggestion = (item) => {
+    if (!item) {
+      return;
+    }
+    byId("address").value = item.url;
+    closeSuggestions();
+    send({ type: "nav.go", url: item.url });
+  };
+
+  const renderSuggestions = (items) => {
+    const panel = byId("suggestions");
+    if (!panel) {
+      return;
+    }
+    suggestionItems = items;
+    suggestionIndex = items.length ? 0 : -1;
+    panel.replaceChildren();
+    items.forEach((item, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "suggestion" + (index === suggestionIndex ? " is-selected" : "");
+      const title = document.createElement("span");
+      title.className = "suggestion__title";
+      title.textContent = item.title || item.url;
+      const url = document.createElement("span");
+      url.className = "suggestion__url";
+      url.textContent = item.url;
+      button.append(title, url);
+      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("click", () => chooseSuggestion(item));
+      panel.append(button);
+    });
+    if (!items.length) {
+      panel.hidden = true;
+      send({ type: "ui.dropdown", open: false });
+      return;
+    }
+    panel.hidden = false;
+    const height = Math.min(360, 78 + 8 + items.length * 52);
+    send({ type: "ui.dropdown", open: true, height });
+  };
+
+  const selectSuggestion = (delta) => {
+    if (!suggestionItems.length) {
+      return;
+    }
+    suggestionIndex =
+      (suggestionIndex + delta + suggestionItems.length) % suggestionItems.length;
+    const panel = byId("suggestions");
+    [...panel.querySelectorAll(".suggestion")].forEach((button, index) => {
+      button.classList.toggle("is-selected", index === suggestionIndex);
+    });
+  };
+
+  const formatTime = (seconds) => {
+    if (!seconds) {
+      return "";
+    }
+    try {
+      return new Intl.DateTimeFormat("ru-RU", {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(new Date(seconds * 1000));
+    } catch {
+      return "";
+    }
+  };
 
   const initialFor = (tab) => {
     if (tab.error) {
@@ -83,6 +182,163 @@
     }
   };
 
+  const emptyRow = (text) => {
+    const element = document.createElement("div");
+    element.className = "page-empty";
+    element.textContent = text;
+    return element;
+  };
+
+  const listRow = (title, url, time, onOpen, onDelete = null) => {
+    const row = document.createElement("div");
+    row.className = "page-row";
+
+    const main = document.createElement("button");
+    main.className = "page-row__main";
+    main.type = "button";
+    const titleNode = document.createElement("span");
+    titleNode.className = "page-row__title";
+    titleNode.textContent = title || url;
+    const urlNode = document.createElement("span");
+    urlNode.className = "page-row__url";
+    urlNode.textContent = url;
+    main.append(titleNode, urlNode);
+    main.addEventListener("click", onOpen);
+    row.append(main);
+
+    const timeNode = document.createElement("span");
+    timeNode.className = "page-row__time";
+    timeNode.textContent = time || "";
+    row.append(timeNode);
+
+    if (onDelete) {
+      const remove = document.createElement("button");
+      remove.className = "page-row__remove";
+      remove.type = "button";
+      remove.title = "Удалить";
+      remove.setAttribute("aria-label", "Удалить");
+      remove.textContent = "×";
+      remove.addEventListener("click", onDelete);
+      row.append(remove);
+    } else {
+      row.append(document.createElement("span"));
+    }
+
+    return row;
+  };
+
+  const loadHistory = async (query = "") => {
+    const list = byId("history-list");
+    list.replaceChildren(emptyRow("Загрузка…"));
+    try {
+      const data = await request("history.query", { query, limit: 300 });
+      list.replaceChildren();
+      if (!data.ok) {
+        throw new Error(data.error || "storage error");
+      }
+      const items = data.items || [];
+      if (!items.length) {
+        list.append(emptyRow(query ? "Ничего не найдено." : "История пуста."));
+        return;
+      }
+      items.forEach((item) => {
+        list.append(
+          listRow(
+            item.title || item.url,
+            item.url,
+            formatTime(item.visited_at),
+            () => send({ type: "nav.go", url: item.url }),
+            async () => {
+              await request("history.delete", { entryId: item.id });
+              loadHistory(byId("history-search").value.trim());
+            },
+          ),
+        );
+      });
+    } catch (error) {
+      list.replaceChildren(emptyRow("Не удалось загрузить историю."));
+      console.warn(error);
+    }
+  };
+
+  const loadBookmarks = async () => {
+    const list = byId("bookmarks-list");
+    list.replaceChildren(emptyRow("Загрузка…"));
+    try {
+      const data = await request("bookmarks.list");
+      list.replaceChildren();
+      if (!data.ok) {
+        throw new Error(data.error || "storage error");
+      }
+      const items = data.items || [];
+      if (!items.length) {
+        list.append(emptyRow("Закладок пока нет."));
+        return;
+      }
+      items.forEach((item) => {
+        list.append(
+          listRow(
+            item.title || item.url,
+            item.url,
+            formatTime(item.created_at),
+            () => send({ type: "nav.go", url: item.url }),
+            async () => {
+              await request("bookmarks.remove", { entryId: item.id });
+              loadBookmarks();
+            },
+          ),
+        );
+      });
+    } catch (error) {
+      list.replaceChildren(emptyRow("Не удалось загрузить закладки."));
+      console.warn(error);
+    }
+  };
+
+  const populateSettings = () => {
+    const settings = current.settings || {};
+    const engine = byId("setting-engine");
+    const theme = byId("setting-theme");
+    const startup = byId("setting-startup");
+    if (engine) {
+      engine.value = settings.searchEngine || "ddg";
+    }
+    if (theme) {
+      theme.value = settings.theme || "system";
+    }
+    if (startup) {
+      startup.value = settings.startup || "restore";
+    }
+    const status = byId("settings-status");
+    if (status) {
+      status.textContent = "";
+    }
+  };
+
+  const showInternalPage = (page) => {
+    document.querySelectorAll(".internal-page").forEach((section) => {
+      section.hidden = section.dataset.page !== page;
+    });
+    if (page === "history") {
+      loadHistory(byId("history-search")?.value.trim() || "");
+    } else if (page === "bookmarks") {
+      loadBookmarks();
+    } else if (page === "settings") {
+      populateSettings();
+    } else if (page === "about") {
+      const version = byId("about-version");
+      if (version) {
+        version.textContent = current.version || "0.0.1";
+      }
+    }
+  };
+
+  const hideInternalPages = () => {
+    document.querySelectorAll(".internal-page").forEach((section) => {
+      section.hidden = true;
+    });
+  };
+
   const applyState = (payload) => {
     if (!payload || typeof payload !== "object") {
       return;
@@ -90,6 +346,13 @@
     const previousActive = current.activeId;
     current = { ...current, ...payload };
     const activeChanged = payload.activeId !== previousActive;
+    if (activeChanged) {
+      closeSuggestions();
+    }
+
+    if (payload.theme) {
+      document.documentElement.dataset.theme = payload.theme;
+    }
 
     renderTabs(payload.tabs || [], payload.activeId || 0);
 
@@ -105,17 +368,37 @@
     const loading = Boolean(payload.loading);
     document.documentElement.classList.toggle("loading", loading);
 
-    const reload = byId("reload");
-    reload.dataset.cmd = loading ? "nav.stop" : payload.error ? "nav.retry" : "nav.reload";
-    reload.title = loading ? "Остановить" : payload.error ? "Повторить" : "Обновить (F5)";
-    reload.setAttribute("aria-label", reload.title);
-
-    const newtab = payload.mode === "newtab";
-    document.documentElement.classList.toggle("newtab-mode", newtab);
-
+    const mode = payload.mode || "web";
+    const internal = mode === "internal";
+    const newtab = mode === "newtab";
     const error = payload.error;
+
+    document.documentElement.classList.toggle("newtab-mode", newtab);
+    document.documentElement.classList.toggle("internal-mode", internal);
     document.documentElement.classList.toggle("error-mode", Boolean(error));
-    reload.disabled = newtab;
+
+    if (internal) {
+      const page = payload.internalPage || "";
+      if (page !== currentInternalPage) {
+        currentInternalPage = page;
+        showInternalPage(page);
+      }
+    } else {
+      currentInternalPage = "";
+      hideInternalPages();
+    }
+
+    const reload = byId("reload");
+    reload.dataset.cmd = loading ? "nav.stop" : error ? "nav.retry" : "nav.reload";
+    reload.title = loading ? "Остановить" : error ? "Повторить" : "Обновить (F5)";
+    reload.setAttribute("aria-label", reload.title);
+    reload.disabled = newtab || internal;
+
+    const bookmark = byId("bookmark-current");
+    if (bookmark) {
+      bookmark.disabled = newtab || internal || Boolean(error);
+    }
+
     if (error) {
       byId("error-code").textContent = "Ошибка · " + (error.code || "unknown");
       byId("error-message").textContent = error.message || "Не удалось открыть страницу.";
@@ -134,11 +417,24 @@
       if (message.type === "app.info") {
         const about = byId("about");
         if (about) {
-          about.textContent = "M2.1 · " + message.version;
+          about.textContent = "M3 · " + message.version;
           about.title = "Rustle " + message.version + " (" + message.platform + ")";
         }
+        current.version = message.version;
       } else if (message.type === "state") {
         applyState(message.payload);
+      } else if (message.type === "storage.response") {
+        const waiter = pending.get(message.id);
+        if (!waiter) {
+          return;
+        }
+        pending.delete(message.id);
+        const payload = message.payload || {};
+        if (payload.ok === false) {
+          waiter.reject(new Error(payload.error || "storage error"));
+        } else {
+          waiter.resolve(payload);
+        }
       }
     },
   };
@@ -149,21 +445,72 @@
     address.addEventListener("focus", () => address.select());
     address.addEventListener("click", () => address.select());
     address.addEventListener("keydown", (event) => {
+      const panel = byId("suggestions");
+      const open = panel && !panel.hidden;
+      if (open && event.key === "ArrowDown") {
+        event.preventDefault();
+        selectSuggestion(1);
+        return;
+      }
+      if (open && event.key === "ArrowUp") {
+        event.preventDefault();
+        selectSuggestion(-1);
+        return;
+      }
       if (event.key === "Enter") {
         event.preventDefault();
+        if (open && suggestionIndex >= 0 && suggestionItems[suggestionIndex]) {
+          chooseSuggestion(suggestionItems[suggestionIndex]);
+          return;
+        }
+        closeSuggestions();
         const url = address.value;
         address.blur();
         send({ type: "nav.go", url });
       } else if (event.key === "Escape") {
+        closeSuggestions();
         address.value = current.displayUrl || current.url || "";
         address.blur();
       }
+    });
+
+    let suggestTimer = 0;
+    address.addEventListener("input", () => {
+      clearTimeout(suggestTimer);
+      const query = address.value.trim();
+      if (query.length < 2 || query.startsWith("rustle://")) {
+        closeSuggestions();
+        return;
+      }
+      suggestTimer = setTimeout(async () => {
+        try {
+          const data = await request("suggest.query", { query, limit: 8 });
+          if (address.value.trim() !== query) {
+            return;
+          }
+          renderSuggestions(data.items || []);
+        } catch (error) {
+          closeSuggestions();
+          console.warn(error);
+        }
+      }, 140);
+    });
+    address.addEventListener("blur", () => {
+      setTimeout(closeSuggestions, 120);
     });
 
     document.querySelectorAll("[data-cmd]").forEach((button) => {
       button.addEventListener("click", () => {
         send({ type: button.dataset.cmd });
       });
+    });
+
+    document.addEventListener("click", (event) => {
+      const nav = event.target.closest("[data-nav]");
+      if (nav) {
+        event.preventDefault();
+        send({ type: "nav.go", url: nav.dataset.nav });
+      }
     });
 
     const tabs = byId("tabs");
@@ -210,6 +557,25 @@
       });
     }
 
+    const bookmark = byId("bookmark-current");
+    if (bookmark) {
+      bookmark.addEventListener("click", async () => {
+        if (!current.url || current.url.startsWith("rustle://")) {
+          return;
+        }
+        try {
+          const result = await request("bookmarks.toggle", {
+            url: current.url,
+            title: current.title || current.url,
+          });
+          bookmark.classList.toggle("is-active", Boolean(result.bookmarked));
+          bookmark.title = result.bookmarked ? "Убрать из закладок" : "Добавить в закладки";
+        } catch (error) {
+          console.warn(error);
+        }
+      });
+    }
+
     const newtabForm = byId("newtab-search");
     if (newtabForm) {
       newtabForm.addEventListener("submit", (event) => {
@@ -226,6 +592,40 @@
         send({ type: "nav.go", url: button.dataset.url });
       });
     });
+
+    const historySearch = byId("history-search");
+    if (historySearch) {
+      let timer = 0;
+      historySearch.addEventListener("input", () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => loadHistory(historySearch.value.trim()), 180);
+      });
+    }
+
+    const historyClear = byId("history-clear");
+    if (historyClear) {
+      historyClear.addEventListener("click", async () => {
+        if (!window.confirm("Очистить всю историю?")) {
+          return;
+        }
+        await request("history.clear");
+        loadHistory(byId("history-search").value.trim());
+      });
+    }
+
+    const settingsForm = byId("settings-form");
+    if (settingsForm) {
+      settingsForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        send({
+          type: "settings.save",
+          searchEngine: byId("setting-engine").value,
+          theme: byId("setting-theme").value,
+          startup: byId("setting-startup").value,
+        });
+        byId("settings-status").textContent = "Сохранено";
+      });
+    }
 
     const retry = byId("error-retry");
     if (retry) {

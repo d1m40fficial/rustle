@@ -28,13 +28,23 @@ impl NavigationTarget {
     pub fn into_url(self) -> String {
         match self {
             Self::Url(url) => url,
-            Self::Search { query } => {
-                let mut url = Url::parse(SEARCH_URL).expect("valid search URL");
-                url.query_pairs_mut().append_pair("q", &query);
-                url.to_string()
-            }
+            Self::Search { query } => search_url("ddg", &query),
         }
     }
+}
+
+/// Build a search URL for the selected engine. Unknown engines fall back to
+/// DuckDuckGo.
+pub fn search_url(engine: &str, query: &str) -> String {
+    let (base, parameter) = match engine {
+        "google" => ("https://www.google.com/search", "q"),
+        "yandex" => ("https://yandex.ru/search/", "text"),
+        "bing" => ("https://www.bing.com/search", "q"),
+        _ => (SEARCH_URL, "q"),
+    };
+    let mut url = Url::parse(base).expect("valid search URL");
+    url.query_pairs_mut().append_pair(parameter, query);
+    url.to_string()
 }
 
 /// Resolve address-bar input into a URL or a search query.
@@ -81,6 +91,11 @@ pub fn display_url(url: &str) -> String {
             if path.starts_with("newtab") {
                 return "rustle://newtab".to_owned();
             }
+            for page in ["history", "bookmarks", "settings", "about"] {
+                if path.starts_with(page) {
+                    return format!("rustle://{page}");
+                }
+            }
         }
     }
     url.to_owned()
@@ -106,7 +121,7 @@ fn looks_like_host(input: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{NavigationTarget, display_url, resolve_input};
+    use super::{NavigationTarget, display_url, resolve_input, search_url};
 
     #[test]
     fn keeps_absolute_https_url() {
@@ -155,6 +170,14 @@ mod tests {
     #[test]
     fn empty_input_has_no_target() {
         assert_eq!(resolve_input("   "), None);
+    }
+
+    #[test]
+    fn search_url_uses_selected_engine() {
+        assert_eq!(
+            search_url("yandex", "rustle browser"),
+            "https://yandex.ru/search/?text=rustle+browser"
+        );
     }
 
     #[test]

@@ -11,7 +11,7 @@
     <div class="tabs__items" id="tabs"></div>
     <button class="tab-new" type="button" id="new-tab" title="Новая вкладка (Ctrl+T)" aria-label="Новая вкладка">+</button>
     <span class="tabs__spacer"></span>
-    <span class="build-badge" id="about" title="Версия">M2.1</span>
+    <span class="build-badge" id="about" title="Версия">M3</span>
   </div>
 
   <div class="toolbar" role="toolbar" aria-label="Навигация">
@@ -33,15 +33,26 @@
       <input id="address" class="address__input" type="text" value="rustle://newtab" spellcheck="false" autocomplete="off" aria-label="Адресная строка">
     </div>
 
+    <button class="chrome-btn" type="button" id="bookmark-current" title="Добавить в закладки" aria-label="Добавить в закладки">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.8 1-6.1-4.4-4.3 6.1-.9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+    </button>
     <button class="chrome-btn" type="button" id="go" title="Перейти" aria-label="Перейти">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
-    <button class="chrome-btn" type="button" title="Меню" aria-label="Меню">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="19" r="1.6" fill="currentColor"/></svg>
+    <button class="chrome-btn" type="button" data-nav="rustle://history" title="История" aria-label="История">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+    <button class="chrome-btn" type="button" data-nav="rustle://bookmarks" title="Закладки" aria-label="Закладки">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v17l-6-4-6 4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+    </button>
+    <button class="chrome-btn" type="button" data-nav="rustle://settings" title="Настройки" aria-label="Настройки">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     </button>
   </div>
 
   <div class="progress" id="progress" aria-hidden="true"></div>
+
+  <div class="suggestions" id="suggestions" hidden></div>
 
   <section class="error-view" id="error-view" aria-live="polite">
     <div class="error-view__card">
@@ -59,7 +70,7 @@
   <section class="newtab-view" id="newtab-view">
     <div class="newtab">
       <div class="newtab__brand">Rustle</div>
-      <p class="newtab__tagline">Минималистичный браузер. Стадия M2.1.</p>
+      <p class="newtab__tagline">Минималистичный браузер. Стадия M3.</p>
 
       <form class="newtab__search" id="newtab-search" role="search">
         <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
@@ -81,7 +92,118 @@
         </button>
       </div>
 
-      <p class="newtab__hint">Вкладки и восстановление сессии уже работают. История и настройки — дальше.</p>
+      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают.</p>
+    </div>
+  </section>
+
+  <section class="internal-page" id="page-history" data-page="history" hidden>
+    <header class="page-head">
+      <div>
+        <p class="page-eyebrow">Данные</p>
+        <h1>История</h1>
+      </div>
+      <nav class="page-nav">
+        <button type="button" data-nav="rustle://bookmarks">Закладки</button>
+        <button type="button" data-nav="rustle://settings">Настройки</button>
+        <button type="button" data-nav="rustle://about">О браузере</button>
+      </nav>
+    </header>
+    <div class="page-toolbar">
+      <input id="history-search" class="page-input" type="search" placeholder="Поиск по истории" autocomplete="off">
+      <button id="history-clear" class="button" type="button">Очистить историю</button>
+    </div>
+    <div id="history-list" class="page-list" aria-live="polite"></div>
+  </section>
+
+  <section class="internal-page" id="page-bookmarks" data-page="bookmarks" hidden>
+    <header class="page-head">
+      <div>
+        <p class="page-eyebrow">Коллекция</p>
+        <h1>Закладки</h1>
+      </div>
+      <nav class="page-nav">
+        <button type="button" data-nav="rustle://history">История</button>
+        <button type="button" data-nav="rustle://settings">Настройки</button>
+        <button type="button" data-nav="rustle://about">О браузере</button>
+      </nav>
+    </header>
+    <p class="page-hint">Добавляйте страницы звездой в адресной строке.</p>
+    <div id="bookmarks-list" class="page-list" aria-live="polite"></div>
+  </section>
+
+  <section class="internal-page" id="page-settings" data-page="settings" hidden>
+    <header class="page-head">
+      <div>
+        <p class="page-eyebrow">Поведение</p>
+        <h1>Настройки</h1>
+      </div>
+      <nav class="page-nav">
+        <button type="button" data-nav="rustle://history">История</button>
+        <button type="button" data-nav="rustle://bookmarks">Закладки</button>
+        <button type="button" data-nav="rustle://about">О браузере</button>
+      </nav>
+    </header>
+
+    <form id="settings-form" class="settings">
+      <label class="settings__row">
+        <span>
+          <strong>Поисковик</strong>
+          <small>Используется для запросов из адресной строки.</small>
+        </span>
+        <select id="setting-engine">
+          <option value="ddg">DuckDuckGo</option>
+          <option value="google">Google</option>
+          <option value="yandex">Яндекс</option>
+          <option value="bing">Bing</option>
+        </select>
+      </label>
+      <label class="settings__row">
+        <span>
+          <strong>Тема</strong>
+          <small>Светлая или тёмная оболочка браузера.</small>
+        </span>
+        <select id="setting-theme">
+          <option value="system">Системная</option>
+          <option value="dark">Тёмная</option>
+          <option value="light">Светлая</option>
+        </select>
+      </label>
+      <label class="settings__row">
+        <span>
+          <strong>При запуске</strong>
+          <small>Восстанавливать сессию или открывать новую вкладку.</small>
+        </span>
+        <select id="setting-startup">
+          <option value="restore">Восстанавливать вкладки</option>
+          <option value="newtab">Открывать новую вкладку</option>
+        </select>
+      </label>
+      <div class="settings__actions">
+        <button class="button button--primary" type="submit">Сохранить</button>
+        <span id="settings-status" class="settings__status"></span>
+      </div>
+    </form>
+  </section>
+
+  <section class="internal-page" id="page-about" data-page="about" hidden>
+    <header class="page-head">
+      <div>
+        <p class="page-eyebrow">Проект</p>
+        <h1>Rustle</h1>
+      </div>
+      <nav class="page-nav">
+        <button type="button" data-nav="rustle://history">История</button>
+        <button type="button" data-nav="rustle://bookmarks">Закладки</button>
+        <button type="button" data-nav="rustle://settings">Настройки</button>
+      </nav>
+    </header>
+    <div class="about">
+      <p>Минималистичный браузер на Rust и WebView2. Без телеметрии и фоновой сетевой активности.</p>
+      <dl>
+        <dt>Версия</dt><dd id="about-version">0.0.1</dd>
+        <dt>Движок</dt><dd>WebView2</dd>
+        <dt>Исходники</dt><dd><button class="link" type="button" data-nav="https://github.com/d1m40fficial/rustle">github.com/d1m40fficial/rustle</button></dd>
+      </dl>
     </div>
   </section>
 

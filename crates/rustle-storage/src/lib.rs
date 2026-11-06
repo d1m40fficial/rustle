@@ -1,14 +1,76 @@
-//! Persistent storage. M2 stores the browser session; history and bookmarks
-//! move here in M3.
+//! Persistent storage: SQLite for history/bookmarks, JSON for settings and
+//! the browser session.
 
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
 };
 
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_VERSION: u32 = 1;
+pub const SETTINGS_VERSION: u32 = 1;
+pub const HISTORY_DEDUP_SECONDS: i64 = 30;
+
+pub type StorageResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HistoryEntry {
+    pub id: i64,
+    pub url: String,
+    pub title: String,
+    pub visited_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BookmarkEntry {
+    pub id: i64,
+    pub url: String,
+    pub title: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Suggestion {
+    pub url: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Settings {
+    pub version: u32,
+    #[serde(default = "default_search_engine")]
+    pub search_engine: String,
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    #[serde(default = "default_startup")]
+    pub startup: String,
+}
+
+fn default_search_engine() -> String {
+    "ddg".to_owned()
+}
+
+fn default_theme() -> String {
+    "system".to_owned()
+}
+
+fn default_startup() -> String {
+    "restore".to_owned()
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            version: SETTINGS_VERSION,
+            search_engine: default_search_engine(),
+            theme: default_theme(),
+            startup: default_startup(),
+        }
+    }
+}
 
 /// One tab as persisted between launches.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -45,7 +107,7 @@ impl Default for Session {
 }
 
 /// Per-user data directory. Windows-first; other platforms fall back to the
-/// current directory until M5 packaging adds proper XDG support.
+/// current directory until packaging adds proper XDG support.
 pub fn data_dir() -> PathBuf {
     std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
@@ -57,16 +119,22 @@ pub fn session_path() -> PathBuf {
     data_dir().join("session.json")
 }
 
+pub fn settings_path() -> PathBuf {
+    data_dir().join("settings.json")
+}
+
+pub fn db_path() -> PathBuf {
+    data_dir().join("history.db")
+}
+
 /// Load the session if it exists and has a supported version.
 pub fn load_session() -> Option<Session> {
-    let path = session_path();
-    let bytes = fs::read(path).ok()?;
+    let bytes = fs::read(session_path()).ok()?;
     let session: Session = serde_json::from_slice(&bytes).ok()?;
     (session.version == SESSION_VERSION).then_some(session)
 }
 
-/// Save the session. The file is small, so a direct write is acceptable in M2;
-/// atomic replace will come with the storage hardening pass.
+/// Save the session. The file is small, so a direct write is acceptable for now.
 pub fn save_session(session: &Session) -> std::io::Result<()> {
     let path = session_path();
     if let Some(parent) = path.parent() {
@@ -76,8 +144,340 @@ pub fn save_session(session: &Session) -> std::io::Result<()> {
     fs::write(path, bytes)
 }
 
-/// Convenience for tests and for callers that already have a path.
+pub fn load_settings() -> Settings {
+    let Ok(bytes) = fs::read(settings_path()) else {
+        return Settings::default();
+    };
+    let Ok(settings) = serde_json::from_slice::<Settings>(&bytes) else {
+        return Settings::default();
+    };
+    if settings.version == SETTINGS_VERSION {
+        settings
+    } else {
+        Settings::default()
+    }
+}
+
+pub fn save_settings(settings: &Settings) -> std::io::Result<()> {
+    let path = settings_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let bytes = serde_json::to_vec_pretty(settings).map_err(std::io::Error::other)?;
+    fs::write(path, bytes)
+}
+
+/// SQLite-backed history and bookmarks.
+pub struct Storage {
+    conn: Connection,
+}
+
+impl Storage {
+    pub fn open_default() -> StorageResult<Self> {
+        fs::create_dir_all(data_dir())?;
+        let conn = Connection::open(db_path())?;
+        Self::from_connection(conn)
+    }
+
+    fn from_connection(conn: Connection) -> StorageResult<Self> {
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             PRAGMA foreign_keys=ON;
+             PRAGMA busy_timeout=5000;",
+        )?;
+
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS history (
+                id          INTEGER PRIMARY KEY,
+                url         TEXT NOT NULL,
+                title       TEXT NOT NULL DEFAULT '',
+                visited_at  INTEGER NOT NULL,
+                visit_count INTEGER NOT NULL DEFAULT 1
+             );
+             CREATE INDEX IF NOT EXISTS idx_history_visited ON history(visited_at DESC);
+             CREATE INDEX IF NOT EXISTS idx_history_url ON history(url);
+
+             CREATE TABLE IF NOT EXISTS bookmarks (
+                id          INTEGER PRIMARY KEY,
+                url         TEXT NOT NULL UNIQUE,
+                title       TEXT NOT NULL DEFAULT '',
+                created_at  INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_bookmarks_created ON bookmarks(created_at DESC);
+
+             CREATE TABLE IF NOT EXISTS meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+             );",
+        )?;
+
+        Ok(Self { conn })
+    }
+
+    #[cfg(test)]
+    fn in_memory() -> StorageResult<Self> {
+        Self::from_connection(Connection::open_in_memory()?)
+    }
+
+    pub fn record_visit(&self, url: &str, title: &str) -> StorageResult<()> {
+        let now = unix_now();
+        let last: Option<(i64, i64)> = self
+            .conn
+            .query_row(
+                "SELECT id, visited_at FROM history WHERE url = ?1 ORDER BY visited_at DESC LIMIT 1",
+                params![url],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+
+        if let Some((id, visited_at)) = last {
+            if now - visited_at <= HISTORY_DEDUP_SECONDS {
+                self.conn.execute(
+                    "UPDATE history
+                     SET title = ?1, visited_at = ?2, visit_count = visit_count + 1
+                     WHERE id = ?3",
+                    params![title, now, id],
+                )?;
+                return Ok(());
+            }
+        }
+
+        self.conn.execute(
+            "INSERT INTO history (url, title, visited_at) VALUES (?1, ?2, ?3)",
+            params![url, title, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn history(&self, query: &str, limit: u32) -> StorageResult<Vec<HistoryEntry>> {
+        let limit = limit.clamp(1, 500);
+        let pattern = format!("%{}%", query.trim());
+        let mut statement = self.conn.prepare(
+            "SELECT id, url, title, visited_at
+             FROM history
+             WHERE url LIKE ?1 OR title LIKE ?1
+             ORDER BY visited_at DESC
+             LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![pattern, limit], |row| {
+            Ok(HistoryEntry {
+                id: row.get(0)?,
+                url: row.get(1)?,
+                title: row.get(2)?,
+                visited_at: row.get(3)?,
+            })
+        })?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
+    }
+
+    pub fn delete_history(&self, id: i64) -> StorageResult<()> {
+        self.conn
+            .execute("DELETE FROM history WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn clear_history(&self) -> StorageResult<()> {
+        self.conn.execute("DELETE FROM history", [])?;
+        Ok(())
+    }
+
+    pub fn bookmarks(&self) -> StorageResult<Vec<BookmarkEntry>> {
+        let mut statement = self
+            .conn
+            .prepare("SELECT id, url, title, created_at FROM bookmarks ORDER BY created_at DESC")?;
+        let rows = statement.query_map([], |row| {
+            Ok(BookmarkEntry {
+                id: row.get(0)?,
+                url: row.get(1)?,
+                title: row.get(2)?,
+                created_at: row.get(3)?,
+            })
+        })?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
+    }
+
+    pub fn is_bookmarked(&self, url: &str) -> StorageResult<bool> {
+        let id: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT id FROM bookmarks WHERE url = ?1",
+                params![url],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(id.is_some())
+    }
+
+    /// Add if missing, remove if present. Returns the new bookmarked state.
+    pub fn toggle_bookmark(&self, url: &str, title: &str) -> StorageResult<bool> {
+        if self.is_bookmarked(url)? {
+            self.conn
+                .execute("DELETE FROM bookmarks WHERE url = ?1", params![url])?;
+            Ok(false)
+        } else {
+            self.conn.execute(
+                "INSERT INTO bookmarks (url, title, created_at) VALUES (?1, ?2, ?3)",
+                params![url, title, unix_now()],
+            )?;
+            Ok(true)
+        }
+    }
+
+    pub fn remove_bookmark(&self, id: i64) -> StorageResult<()> {
+        self.conn
+            .execute("DELETE FROM bookmarks WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn clear_bookmarks(&self) -> StorageResult<()> {
+        self.conn.execute("DELETE FROM bookmarks", [])?;
+        Ok(())
+    }
+
+    pub fn suggestions(&self, query: &str, limit: u32) -> StorageResult<Vec<Suggestion>> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let pattern = format!("%{query}%");
+        let limit = limit.clamp(1, 20) as usize;
+        let mut scores: HashMap<String, (String, f64)> = HashMap::new();
+
+        {
+            let mut statement = self.conn.prepare(
+                "SELECT url, MAX(title), COUNT(*), MAX(visited_at)
+                 FROM history
+                 WHERE url LIKE ?1 OR title LIKE ?1
+                 GROUP BY url
+                 ORDER BY COUNT(*) DESC, MAX(visited_at) DESC
+                 LIMIT 16",
+            )?;
+            let rows = statement.query_map(params![pattern], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?;
+            for row in rows {
+                let (url, title, visits) = row?;
+                scores.insert(url, (title, visits as f64));
+            }
+        }
+
+        {
+            let mut statement = self.conn.prepare(
+                "SELECT url, title FROM bookmarks
+                 WHERE url LIKE ?1 OR title LIKE ?1
+                 ORDER BY created_at DESC
+                 LIMIT 16",
+            )?;
+            let rows = statement.query_map(params![pattern], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            for row in rows {
+                let (url, title) = row?;
+                let entry = scores.entry(url).or_insert((title.clone(), 0.0));
+                if entry.0.is_empty() {
+                    entry.0 = title;
+                }
+                entry.1 += 50.0;
+            }
+        }
+
+        let mut items: Vec<(String, String, f64)> = scores
+            .into_iter()
+            .map(|(url, (title, score))| (url, title, score))
+            .collect();
+        items.sort_by(|a, b| {
+            b.2.partial_cmp(&a.2)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.cmp(&b.0))
+        });
+        items.truncate(limit);
+
+        Ok(items
+            .into_iter()
+            .map(|(url, title, _)| Suggestion { url, title })
+            .collect())
+    }
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Convenience for callers that already have a path.
 pub fn save_session_to(path: &Path, session: &Session) -> std::io::Result<()> {
     let bytes = serde_json::to_vec_pretty(session).map_err(std::io::Error::other)?;
     fs::write(path, bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Storage;
+
+    #[test]
+    fn records_and_deduplicates_history() {
+        let storage = Storage::in_memory().expect("storage");
+        storage
+            .record_visit("https://example.com", "Example")
+            .unwrap();
+        storage
+            .record_visit("https://example.com", "Example 2")
+            .unwrap();
+
+        let history = storage.history("", 10).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].title, "Example 2");
+    }
+
+    #[test]
+    fn searches_history_and_bookmarks() {
+        let storage = Storage::in_memory().expect("storage");
+        storage
+            .record_visit("https://example.com", "Example")
+            .unwrap();
+        storage
+            .record_visit("https://rustle.dev", "Rustle project")
+            .unwrap();
+        storage
+            .toggle_bookmark("https://example.com", "Example")
+            .unwrap();
+
+        let history = storage.history("rustle", 10).unwrap();
+        assert_eq!(history.len(), 1);
+
+        let suggestions = storage.suggestions("example", 10).unwrap();
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].url, "https://example.com");
+    }
+
+    #[test]
+    fn toggles_bookmarks() {
+        let storage = Storage::in_memory().expect("storage");
+        assert!(
+            storage
+                .toggle_bookmark("https://example.com", "Example")
+                .unwrap()
+        );
+        assert!(storage.is_bookmarked("https://example.com").unwrap());
+        assert!(
+            !storage
+                .toggle_bookmark("https://example.com", "Example")
+                .unwrap()
+        );
+        assert!(!storage.is_bookmarked("https://example.com").unwrap());
+    }
 }

@@ -5,7 +5,7 @@
 
 pub mod address;
 
-pub use address::{ErrorInfo, NavigationTarget, display_url, resolve_input};
+pub use address::{ErrorInfo, NavigationTarget, display_url, resolve_input, search_url};
 
 use serde::{Deserialize, Serialize};
 
