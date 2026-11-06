@@ -59,6 +59,10 @@ pub struct Settings {
     pub theme: String,
     #[serde(default = "default_startup")]
     pub startup: String,
+    #[serde(default)]
+    pub https_first: bool,
+    #[serde(default)]
+    pub clear_on_exit: bool,
 }
 
 fn default_search_engine() -> String {
@@ -80,6 +84,8 @@ impl Default for Settings {
             search_engine: default_search_engine(),
             theme: default_theme(),
             startup: default_startup(),
+            https_first: false,
+            clear_on_exit: false,
         }
     }
 }

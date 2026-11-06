@@ -194,6 +194,20 @@
           <option value="newtab">Открывать новую вкладку</option>
         </select>
       </label>
+      <label class="settings__row">
+        <span>
+          <strong>HTTPS-first</strong>
+          <small>Пробовать HTTPS для HTTP-адресов, кроме localhost.</small>
+        </span>
+        <input id="setting-https" type="checkbox">
+      </label>
+      <label class="settings__row">
+        <span>
+          <strong>Очищать при выходе</strong>
+          <small>Удалять историю, сессию и данные WebView2 после закрытия.</small>
+        </span>
+        <input id="setting-clear-exit" type="checkbox">
+      </label>
       <div class="settings__actions">
         <button class="button button--primary" type="submit">Сохранить</button>
         <button id="clear-data" class="button" type="button">Очистить cookies и кэш</button>

@@ -6,6 +6,7 @@ mod storage_worker;
 use std::{
     borrow::Cow,
     cell::RefCell,
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     process::Command as ProcessCommand,
@@ -49,6 +50,18 @@ use webview2_com::{
         ICoreWebView2Profile2,
     },
     StateChangedEventHandler,
+};
+#[cfg(target_os = "windows")]
+use webview2_com::{
+    Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_PERMISSION_KIND_AUTOPLAY, COREWEBVIEW2_PERMISSION_KIND_CAMERA,
+        COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ, COREWEBVIEW2_PERMISSION_KIND_FILE_READ_WRITE,
+        COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION, COREWEBVIEW2_PERMISSION_KIND_MICROPHONE,
+        COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS, COREWEBVIEW2_PERMISSION_KIND_OTHER_SENSORS,
+        COREWEBVIEW2_PERMISSION_KIND_UNKNOWN_PERMISSION, COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+        COREWEBVIEW2_PERMISSION_STATE_DENY,
+    },
+    PermissionRequestedEventHandler, ProcessFailedEventHandler,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Com::IStream;
@@ -156,6 +169,7 @@ struct AppState {
     bookmark_bar: bool,
     bookmarks: Vec<BookmarkEntry>,
     find_open: bool,
+    permissions: HashMap<String, bool>,
     downloads: Vec<DownloadEntry>,
     next_download_id: u64,
     private: bool,
@@ -190,6 +204,7 @@ impl AppState {
             bookmark_bar: false,
             bookmarks: Vec::new(),
             find_open: false,
+            permissions: HashMap::new(),
             downloads: Vec::new(),
             next_download_id: 1,
             private: false,
@@ -538,6 +553,8 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                 "searchEngine": state.settings.search_engine,
                 "theme": state.settings.theme,
                 "startup": state.settings.startup,
+                "httpsFirst": state.settings.https_first,
+                "clearOnExit": state.settings.clear_on_exit,
             },
             "downloads": downloads_payload(&state),
         });
@@ -930,6 +947,8 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
         if let Some(webview) = state_ref.tab(tab_id).and_then(|tab| tab.webview.as_ref()) {
             install_tab_navigation_handlers(state, webview, tab_id, proxy);
             install_download_handler(state, webview, tab_id);
+            install_permission_handler(state, webview);
+            install_crash_handler(state, webview, tab_id);
             if !state.borrow().private {
                 install_favicon_handler(state, webview, tab_id);
             }
@@ -944,9 +963,17 @@ fn navigate_active(state: &Rc<RefCell<AppState>>, input: &str) {
     let Some(target) = resolve_input(input) else {
         return;
     };
-    let engine = state.borrow().settings.search_engine.clone();
+    let (engine, https_first) = {
+        let state = state.borrow();
+        (
+            state.settings.search_engine.clone(),
+            state.settings.https_first,
+        )
+    };
     let url = match target {
-        rustle_core::NavigationTarget::Url(url) => canonicalize_internal(url),
+        rustle_core::NavigationTarget::Url(url) => {
+            maybe_upgrade_https(canonicalize_internal(url), https_first)
+        }
         rustle_core::NavigationTarget::Search { query } => search_url(&engine, &query),
     };
 
@@ -1449,7 +1476,10 @@ fn open_external_url(state: &Rc<RefCell<AppState>>, input: &str) {
         return;
     };
     let url = match target {
-        rustle_core::NavigationTarget::Url(url) => canonicalize_internal(url),
+        rustle_core::NavigationTarget::Url(url) => {
+            let settings = state.borrow().settings.clone();
+            maybe_upgrade_https(canonicalize_internal(url), settings.https_first)
+        }
         rustle_core::NavigationTarget::Search { query } => {
             search_url(&state.borrow().settings.search_engine, &query)
         }
@@ -2238,6 +2268,136 @@ fn find_in_page(state: &Rc<RefCell<AppState>>, text: &str, forward: bool) {
     }
 }
 
+fn maybe_upgrade_https(url: String, enabled: bool) -> String {
+    if !enabled {
+        return url;
+    }
+    let Ok(mut parsed) = Url::parse(&url) else {
+        return url;
+    };
+    if parsed.scheme() != "http" {
+        return url;
+    }
+    let host = parsed.host_str().unwrap_or("");
+    if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+        return url;
+    }
+    if parsed.set_scheme("https").is_ok() {
+        parsed.to_string()
+    } else {
+        url
+    }
+}
+
+fn shutdown(state: &Rc<RefCell<AppState>>) {
+    let clear = state.borrow().settings.clear_on_exit && !state.borrow().private;
+    if clear {
+        clear_browsing_data(state);
+        if let Ok(storage) = rustle_storage::Storage::open_default() {
+            let _ = storage.clear_history();
+        }
+        let _ = fs::remove_file(rustle_storage::session_path());
+    } else {
+        save_session_state(state, true);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn permission_label(kind: i32) -> &'static str {
+    if kind == COREWEBVIEW2_PERMISSION_KIND_CAMERA.0 {
+        "доступ к камере"
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE.0 {
+        "доступ к микрофону"
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION.0 {
+        "геолокацию"
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS.0 {
+        "уведомления"
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ.0 {
+        "чтение буфера обмена"
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_FILE_READ_WRITE.0 {
+        "доступ к файлам"
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_AUTOPLAY.0 {
+        "автовоспроизведение"
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_OTHER_SENSORS.0 {
+        "доступ к датчикам"
+    } else {
+        "разрешение"
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn install_permission_handler(state: &Rc<RefCell<AppState>>, webview: &WebView) {
+    let state = Rc::clone(state);
+    let mut token = 0;
+    let handler = PermissionRequestedEventHandler::create(Box::new(move |_sender, args| {
+        let Some(args) = args else {
+            return Ok(());
+        };
+        let mut kind = COREWEBVIEW2_PERMISSION_KIND_UNKNOWN_PERMISSION;
+        let mut raw = windows_core::PWSTR::null();
+        unsafe {
+            let _ = args.PermissionKind(&mut kind);
+            let _ = args.Uri(&mut raw);
+        }
+        let kind = kind.0;
+        let origin = unsafe { raw.to_string().unwrap_or_default() };
+        let key = format!("{origin}:{kind}");
+        let allowed = if let Some(value) = state.borrow().permissions.get(&key) {
+            *value
+        } else {
+            let label = permission_label(kind);
+            let answer = rfd::MessageDialog::new()
+                .set_title("Разрешение")
+                .set_description(format!("{origin}\n\nРазрешить {label}?"))
+                .set_buttons(rfd::MessageButtons::YesNo)
+                .show();
+            let allowed = answer == rfd::MessageDialogResult::Yes;
+            state.borrow_mut().permissions.insert(key, allowed);
+            allowed
+        };
+        unsafe {
+            let _ = args.SetState(if allowed {
+                COREWEBVIEW2_PERMISSION_STATE_ALLOW
+            } else {
+                COREWEBVIEW2_PERMISSION_STATE_DENY
+            });
+        }
+        Ok(())
+    }));
+    unsafe {
+        let _ = webview
+            .webview()
+            .add_PermissionRequested(&handler, &mut token);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn install_crash_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, tab_id: TabId) {
+    let state = Rc::clone(state);
+    let mut token = 0;
+    let handler = ProcessFailedEventHandler::create(Box::new(move |_sender, args| {
+        if let Some(_args) = args {
+            set_tab_error(
+                &state,
+                tab_id,
+                ErrorInfo {
+                    code: "render".to_owned(),
+                    message: "Процесс страницы упал. Нажмите «Повторить».".to_owned(),
+                },
+            );
+        }
+        Ok(())
+    }));
+    unsafe {
+        let _ = webview.webview().add_ProcessFailed(&handler, &mut token);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn install_permission_handler(_state: &Rc<RefCell<AppState>>, _webview: &WebView) {}
+#[cfg(not(target_os = "windows"))]
+fn install_crash_handler(_state: &Rc<RefCell<AppState>>, _webview: &WebView, _tab_id: TabId) {}
+
 fn storage_query(state: &Rc<RefCell<AppState>>, request_id: u64, query: StorageQuery) {
     if let Some(storage) = &state.borrow().storage {
         let _ = storage.send(StorageCommand::Query { request_id, query });
@@ -2569,6 +2729,12 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                     settings.startup = value.to_owned();
                 }
             }
+            if let Some(value) = message.get("httpsFirst").and_then(|value| value.as_bool()) {
+                settings.https_first = value;
+            }
+            if let Some(value) = message.get("clearOnExit").and_then(|value| value.as_bool()) {
+                settings.clear_on_exit = value;
+            }
             if !state.borrow().private {
                 let _ = rustle_storage::save_settings(&settings);
             }
@@ -2786,7 +2952,7 @@ fn main() -> wry::Result<()> {
         match event {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => {
-                    save_session_state(&state, true);
+                    shutdown(&state);
                     if let Some(root) = &private_cleanup {
                         schedule_private_cleanup(root.clone());
                     }
@@ -2878,7 +3044,7 @@ fn main() -> wry::Result<()> {
                 push_ui_state(&state);
             }
             Event::UserEvent(AppEvent::Exit) => {
-                save_session_state(&state, true);
+                shutdown(&state);
                 if let Some(root) = &private_cleanup {
                     schedule_private_cleanup(root.clone());
                 }

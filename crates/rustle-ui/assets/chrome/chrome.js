@@ -425,6 +425,14 @@
     if (startup) {
       startup.value = settings.startup || "restore";
     }
+    const https = byId("setting-https");
+    if (https) {
+      https.checked = Boolean(settings.httpsFirst);
+    }
+    const clearExit = byId("setting-clear-exit");
+    if (clearExit) {
+      clearExit.checked = Boolean(settings.clearOnExit);
+    }
     const status = byId("settings-status");
     if (status) {
       status.textContent = "";
@@ -841,6 +849,8 @@
           searchEngine: byId("setting-engine").value,
           theme: byId("setting-theme").value,
           startup: byId("setting-startup").value,
+          httpsFirst: byId("setting-https").checked,
+          clearOnExit: byId("setting-clear-exit").checked,
         });
         byId("settings-status").textContent = "Сохранено";
       });
