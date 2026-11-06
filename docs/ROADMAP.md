@@ -56,7 +56,7 @@ Scoop прописывает PATH и [[BT]]CARGO_HOME[[BT]]/[[BT]]RUSTUP_HOME[[B
 - [x] Окно 1280×800: chrome WebView, content WebView, custom protocol, IPC.
 - [x] Трассировка старта: метки процесса, окна, content, chrome, chrome-ready.
 - [ ] Логирование через tracing и panic hook (сейчас простые startup-метки).
-- [x] CI workflow: fmt, clippy, test, release build (проверить зелёный после push).
+- [x] CI workflow: fmt, clippy, test, release build; зелёный на windows-latest (run 42249192281).
 - [x] Спайк движка и документ [[BT]]docs/spikes/engine-capabilities.md[[BT]].
 - [x] ADR-0001 (движок), ADR-0002 (HTML-оболочка), ADR-0003 (GNU/WebView2Loader).
 - [x] Вендоринг [[BT]]WebView2Loader.dll[[BT]] и копирование build.rs.

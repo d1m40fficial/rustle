@@ -1,5 +1,7 @@
 # Rustle
 
+[![CI](https://github.com/d1m40fficial/rustle/actions/workflows/ci.yml/badge.svg)](https://github.com/d1m40fficial/rustle/actions/workflows/ci.yml)
+
 Минималистичный браузер на Rust: быстрый запуск, низкое потребление памяти, ничего лишнего.
 
 > Статус: **M0 — каркас работает**. Есть окно, chrome WebView, content WebView,
