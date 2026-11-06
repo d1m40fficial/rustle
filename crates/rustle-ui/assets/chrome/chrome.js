@@ -154,7 +154,20 @@
 
       const favicon = document.createElement("span");
       favicon.className = "tab__favicon";
-      favicon.textContent = initialFor(tab);
+      if (tab.favicon) {
+        favicon.classList.add("tab__favicon--image");
+        const image = document.createElement("img");
+        image.src = "rustle://localhost/favicon/" + tab.favicon;
+        image.alt = "";
+        image.addEventListener("error", () => {
+          favicon.classList.remove("tab__favicon--image");
+          favicon.replaceChildren();
+          favicon.textContent = initialFor(tab);
+        });
+        favicon.append(image);
+      } else {
+        favicon.textContent = initialFor(tab);
+      }
 
       const spinner = document.createElement("span");
       spinner.className = "tab__spinner";

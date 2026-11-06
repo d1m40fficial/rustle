@@ -956,3 +956,14 @@ html[data-theme="light"] .suggestions {
     width: 100%;
   }
 }
+
+.tab__favicon--image {
+  background: transparent;
+}
+
+.tab__favicon img {
+  width: 16px;
+  height: 16px;
+  display: block;
+  object-fit: contain;
+}

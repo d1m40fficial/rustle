@@ -39,15 +39,17 @@ use wry::{WebViewBuilderExtWindows, WebViewExtWindows};
 #[cfg(target_os = "windows")]
 use webview2_com::{
     BytesReceivedChangedEventHandler, ClearBrowsingDataCompletedHandler,
-    DownloadStartingEventHandler,
+    DownloadStartingEventHandler, FaviconChangedEventHandler, GetFaviconCompletedHandler,
     Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED, COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS,
-        COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED, ICoreWebView2_4, ICoreWebView2_13,
-        ICoreWebView2DownloadOperation, ICoreWebView2Profile2,
+        COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED, COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG,
+        ICoreWebView2_4, ICoreWebView2_13, ICoreWebView2_15, ICoreWebView2DownloadOperation,
+        ICoreWebView2Profile2,
     },
     StateChangedEventHandler,
 };
 #[cfg(target_os = "windows")]
+use windows::Win32::System::Com::IStream;
 use windows_core::{Interface, PCWSTR};
 
 const CHROME_COLLAPSED: u32 = 78;
@@ -90,6 +92,7 @@ struct Tab {
     webview: Option<WebView>,
     nav_id: u64,
     return_url: Option<String>,
+    favicon: Option<String>,
 }
 
 impl Tab {
@@ -105,6 +108,7 @@ impl Tab {
             webview: None,
             nav_id: 0,
             return_url: None,
+            favicon: None,
         }
     }
 }
@@ -228,6 +232,19 @@ fn protocol_handler(_id: WebViewId, request: Request<Vec<u8>>) -> Response<Cow<'
 
     if path.contains("..") || path.contains('\\') {
         return text_response(400, "bad request");
+    }
+
+    if let Some(name) = path.strip_prefix("favicon/") {
+        if name.ends_with(".png") && name.chars().all(|ch| ch.is_ascii_hexdigit() || ch == '.') {
+            if let Ok(bytes) = fs::read(favicon_cache_path(name)) {
+                return Response::builder()
+                    .status(200)
+                    .header("content-type", "image/png")
+                    .header("x-content-type-options", "nosniff")
+                    .body(Cow::Owned(bytes))
+                    .expect("valid favicon response");
+            }
+        }
     }
 
     match asset(path) {
@@ -402,7 +419,11 @@ fn restore_session(state: &Rc<RefCell<AppState>>, session: Option<Session>) {
             } else {
                 tab.url
             });
-            push_tab(&mut state, url, tab.title);
+            let favicon = cached_favicon(&url);
+            let id = push_tab(&mut state, url, tab.title);
+            if let Some(tab) = state.tab_mut(id) {
+                tab.favicon = favicon;
+            }
         }
         let active_index = session.active.min(state.tabs.len().saturating_sub(1));
         state.active = state.tabs[active_index].id;
@@ -433,6 +454,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                     "id": tab.id.0,
                     "title": effective_tab_title(tab),
                     "url": display_url(&tab.url),
+                    "favicon": tab.favicon,
                     "loading": tab.loading,
                     "active": tab.id == state.active,
                     "error": tab.error.clone(),
@@ -724,6 +746,7 @@ fn on_navigation(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: String) {
         };
         let had_error = tab.error.take().is_some();
         tab.url = url;
+        tab.favicon = cached_favicon(&tab.url);
         tab.title.clear();
         tab.loading = true;
         had_error && active == tab_id
@@ -870,6 +893,7 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
         if let Some(webview) = state_ref.tab(tab_id).and_then(|tab| tab.webview.as_ref()) {
             install_tab_navigation_handlers(state, webview, tab_id, proxy);
             install_download_handler(state, webview, tab_id);
+            install_favicon_handler(state, webview, tab_id);
             install_accelerators_for_view(state, webview);
         }
     }
@@ -1839,6 +1863,97 @@ fn clear_browsing_data(state: &Rc<RefCell<AppState>>) {
 
 #[cfg(not(target_os = "windows"))]
 fn clear_browsing_data(_state: &Rc<RefCell<AppState>>) {}
+
+fn favicon_name(url: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in url.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}.png")
+}
+
+fn favicon_cache_path(name: &str) -> PathBuf {
+    rustle_storage::data_dir().join("favicons").join(name)
+}
+
+fn cached_favicon(url: &str) -> Option<String> {
+    let name = favicon_name(url);
+    favicon_cache_path(&name).exists().then_some(name)
+}
+
+#[cfg(target_os = "windows")]
+fn read_istream(stream: &IStream) -> Vec<u8> {
+    let mut data = Vec::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let mut read = 0u32;
+        let result = unsafe {
+            stream.Read(
+                buffer.as_mut_ptr() as *mut _,
+                buffer.len() as u32,
+                Some(&mut read),
+            )
+        };
+        if result.is_err() || read == 0 {
+            break;
+        }
+        data.extend_from_slice(&buffer[..read as usize]);
+    }
+    data
+}
+
+#[cfg(target_os = "windows")]
+fn install_favicon_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, tab_id: TabId) {
+    let Ok(webview15) = webview.webview().cast::<ICoreWebView2_15>() else {
+        return;
+    };
+    let state = Rc::clone(state);
+    let callback_view = webview15.clone();
+    let mut token = 0;
+    let handler = FaviconChangedEventHandler::create(Box::new(move |_sender, _args| {
+        let webview = callback_view.clone();
+        let state = Rc::clone(&state);
+        let completed = GetFaviconCompletedHandler::create(Box::new(move |result, stream| {
+            if result.is_ok() {
+                if let Some(stream) = stream {
+                    let bytes = read_istream(&stream);
+                    if !bytes.is_empty() {
+                        let url = state
+                            .borrow()
+                            .tab(tab_id)
+                            .map(|tab| tab.url.clone())
+                            .unwrap_or_default();
+                        if url.starts_with("http://") || url.starts_with("https://") {
+                            let name = favicon_name(&url);
+                            let path = favicon_cache_path(&name);
+                            if let Some(parent) = path.parent() {
+                                let _ = fs::create_dir_all(parent);
+                            }
+                            if fs::write(&path, bytes).is_ok() {
+                                if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+                                    tab.favicon = Some(name);
+                                }
+                                push_ui_state(&state);
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }));
+        unsafe {
+            let _ = webview.GetFavicon(COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG, &completed);
+        }
+        Ok(())
+    }));
+    unsafe {
+        let _ = webview15.add_FaviconChanged(&handler, &mut token);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn install_favicon_handler(_state: &Rc<RefCell<AppState>>, _webview: &WebView, _tab_id: TabId) {}
 
 fn storage_query(state: &Rc<RefCell<AppState>>, request_id: u64, query: StorageQuery) {
     if let Some(storage) = &state.borrow().storage {
