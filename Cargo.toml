@@ -22,7 +22,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tao = "0.37"
 url = "2"
-wry = "0.57"
+windows-core = "0.62"
+wry = { version = "0.57", features = ["devtools"] }
 webview2-com = "0.39"
 rustle-core = { path = "crates/rustle-core" }
 rustle-ui = { path = "crates/rustle-ui" }

@@ -8,27 +8,29 @@
 </head>
 <body>
   <div class="tabs" role="tablist" aria-label="Вкладки">
-    <div class="tab tab--active" role="tab" aria-selected="true" tabindex="0">
-      <span class="tab__favicon" aria-hidden="true"></span>
-      <span class="tab__title">Новая вкладка</span>
+    <div class="tab tab--active" id="tab" role="tab" aria-selected="true" tabindex="0">
+      <span class="tab__favicon" id="tab-favicon">R</span>
+      <span class="tab__spinner" aria-hidden="true"></span>
+      <span class="tab__title" id="tab-title">Новая вкладка</span>
     </div>
     <button class="tab-new" type="button" title="Новая вкладка (Ctrl+T)" aria-label="Новая вкладка">+</button>
     <span class="tabs__spacer"></span>
-    <span class="build-badge" id="about" title="Версия">M0</span>
+    <span class="build-badge" id="about" title="Версия">M1</span>
     <button class="chrome-btn" type="button" id="overlay-toggle" title="Проверка перекрытия" aria-label="Проверка перекрытия">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
   </div>
 
   <div class="toolbar" role="toolbar" aria-label="Навигация">
-    <button class="chrome-btn" type="button" data-cmd="nav.back" title="Назад (Alt+←)" aria-label="Назад">
+    <button class="chrome-btn" type="button" id="back" data-cmd="nav.back" title="Назад (Alt+←)" aria-label="Назад" disabled>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
-    <button class="chrome-btn" type="button" data-cmd="nav.forward" title="Вперёд (Alt+→)" aria-label="Вперёд">
+    <button class="chrome-btn" type="button" id="forward" data-cmd="nav.forward" title="Вперёд (Alt+→)" aria-label="Вперёд" disabled>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
-    <button class="chrome-btn" type="button" data-cmd="nav.reload" title="Обновить (F5)" aria-label="Обновить">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20 4v7h-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <button class="chrome-btn" type="button" id="reload" data-cmd="nav.reload" title="Обновить (F5)" aria-label="Обновить">
+      <svg class="icon-reload" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20 4v7h-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <svg class="icon-stop" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     </button>
 
     <div class="address">
@@ -46,9 +48,24 @@
     </button>
   </div>
 
+  <div class="progress" id="progress" aria-hidden="true"></div>
+
+  <section class="error-view" id="error-view" aria-live="polite">
+    <div class="error-view__card">
+      <p class="error-view__eyebrow" id="error-code">Ошибка загрузки</p>
+      <h1 class="error-view__title">Не удалось открыть страницу</h1>
+      <p class="error-view__text" id="error-message">Проверьте адрес и подключение к интернету.</p>
+      <p class="error-view__url" id="error-url"></p>
+      <div class="error-view__actions">
+        <button class="button button--primary" type="button" id="error-retry">Повторить</button>
+        <button class="button" type="button" id="error-back">Назад</button>
+      </div>
+    </div>
+  </section>
+
   <section class="overlay" id="overlay" aria-label="Проверка перекрытия">
     <div class="overlay__card">
-      <p class="overlay__eyebrow">M0 · spike</p>
+      <p class="overlay__eyebrow">M1 · spike</p>
       <h1 class="overlay__title">Chrome поверх контента</h1>
       <p class="overlay__text">Если вы видите эту панель, chrome WebView перекрывает content WebView и z-order работает. Это база для выпадающих подсказок адресной строки.</p>
       <button class="overlay__button" type="button" id="overlay-close">Свернуть</button>

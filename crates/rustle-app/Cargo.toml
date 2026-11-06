@@ -20,3 +20,4 @@ wry.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 webview2-com.workspace = true
+windows-core.workspace = true

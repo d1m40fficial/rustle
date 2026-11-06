@@ -3,6 +3,10 @@
 //! This crate contains no UI, no engine and no storage code. It is the
 //! place for tabs, navigation state, session model and commands.
 
+pub mod address;
+
+pub use address::{ErrorInfo, NavigationTarget, display_url, resolve_input};
+
 use serde::{Deserialize, Serialize};
 
 /// Stable identifier of a browser tab.

@@ -1649,6 +1649,7 @@ dependencies = [
  "tao",
  "url",
  "webview2-com",
+ "windows-core",
  "wry",
 ]
 
@@ -1657,6 +1658,7 @@ name = "rustle-core"
 version = "0.0.1"
 dependencies = [
  "serde",
+ "url",
 ]
 
 [[package]]

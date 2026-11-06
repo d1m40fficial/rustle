@@ -1,20 +1,20 @@
-//! Rustle M0 skeleton: native window, HTML chrome WebView, content WebView,
-//! custom protocol and a typed IPC channel.
+//! Rustle M1: navigation, address bar sync, history state, loading UI and
+//! internal error view on top of the M0 WebView2 skeleton.
 
 use std::{borrow::Cow, cell::RefCell, path::PathBuf, rc::Rc, sync::OnceLock, time::Instant};
 
-use rustle_core::VERSION;
+use rustle_core::{ErrorInfo, VERSION, display_url, resolve_input};
 use rustle_ui::{CSP, asset, mime_type};
 use serde_json::json;
 use tao::{
     dpi::LogicalSize as TaoLogicalSize,
     event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
+    event_loop::{ControlFlow, EventLoopBuilder},
     window::WindowBuilder,
 };
 use url::Url;
 use wry::{
-    Rect, WebContext, WebView, WebViewBuilder, WebViewId,
+    NewWindowResponse, PageLoadEvent, Rect, WebContext, WebView, WebViewBuilder, WebViewId,
     dpi::{LogicalPosition, LogicalSize},
     http::{Request, Response},
 };
@@ -35,6 +35,11 @@ fn mark(label: &str) {
     println!("[startup] {:>5}ms {label}", start.elapsed().as_millis());
 }
 
+#[derive(Debug)]
+enum AppEvent {
+    OpenUrl(String),
+}
+
 struct AppState {
     content: Option<WebView>,
     chrome: Option<WebView>,
@@ -42,6 +47,12 @@ struct AppState {
     height: u32,
     chrome_height: u32,
     ready: bool,
+    url: String,
+    title: String,
+    loading: bool,
+    can_back: bool,
+    can_forward: bool,
+    error: Option<ErrorInfo>,
 }
 
 impl AppState {
@@ -53,6 +64,12 @@ impl AppState {
             height,
             chrome_height: CHROME_COLLAPSED,
             ready: false,
+            url: NEWTAB_URL.to_owned(),
+            title: "Новая вкладка".to_owned(),
+            loading: false,
+            can_back: false,
+            can_forward: false,
+            error: None,
         }
     }
 }
@@ -106,21 +123,57 @@ fn protocol_handler(_id: WebViewId, request: Request<Vec<u8>>) -> Response<Cow<'
     }
 }
 
-fn normalize_url(input: &str) -> Option<String> {
-    let input = input.trim();
-    if input.is_empty() {
-        return None;
+fn canonicalize_internal(url: String) -> String {
+    let trimmed = url.trim_end_matches('/');
+    if trimmed == "rustle://newtab" || url.starts_with("rustle://localhost/newtab") {
+        NEWTAB_URL.to_owned()
+    } else {
+        url
     }
+}
 
-    if let Ok(url) = Url::parse(input) {
-        if matches!(url.scheme(), "http" | "https" | "file") {
-            return Some(url.to_string());
+fn effective_title(state: &AppState) -> String {
+    if state.error.is_some() {
+        return "Не удалось открыть страницу".to_owned();
+    }
+    if !state.title.is_empty() {
+        return state.title.clone();
+    }
+    if state.url.starts_with("rustle://") {
+        return "Новая вкладка".to_owned();
+    }
+    Url::parse(&state.url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+        .unwrap_or_else(|| "Rustle".to_owned())
+}
+
+fn push_ui_state(state: &Rc<RefCell<AppState>>) {
+    let payload = {
+        let state = state.borrow();
+        if !state.ready {
+            return;
+        }
+        json!({
+            "url": state.url,
+            "displayUrl": display_url(&state.url),
+            "title": effective_title(&state),
+            "loading": state.loading,
+            "canGoBack": state.can_back,
+            "canGoForward": state.can_forward,
+            "error": state.error.clone(),
+        })
+    };
+
+    let script = format!(
+        "window.rustle && window.rustle.dispatch({{\"type\":\"state\",\"payload\":{payload}}});"
+    );
+    let state = state.borrow();
+    if let Some(chrome) = &state.chrome {
+        if let Err(error) = chrome.evaluate_script(&script) {
+            eprintln!("[ui] state push failed: {error}");
         }
     }
-
-    Url::parse(&format!("https://{input}"))
-        .ok()
-        .map(|url| url.to_string())
 }
 
 fn send_app_info(state: &Rc<RefCell<AppState>>) {
@@ -140,31 +193,246 @@ fn send_app_info(state: &Rc<RefCell<AppState>>) {
     }
 }
 
-fn navigate(state: &Rc<RefCell<AppState>>, input: &str) {
-    let Some(url) = normalize_url(input) else {
-        eprintln!("[nav] invalid address: {input}");
-        return;
+#[cfg(target_os = "windows")]
+fn history_flags(content: &WebView) -> (bool, bool) {
+    use windows_core::BOOL;
+
+    let webview = content.webview();
+    let mut back = BOOL(0);
+    let mut forward = BOOL(0);
+    unsafe {
+        let _ = webview.CanGoBack(&mut back);
+        let _ = webview.CanGoForward(&mut forward);
+    }
+    (back.as_bool(), forward.as_bool())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn history_flags(_content: &WebView) -> (bool, bool) {
+    (false, false)
+}
+
+fn sync_from_content(state: &Rc<RefCell<AppState>>) {
+    let snapshot = {
+        let state = state.borrow();
+        let Some(content) = &state.content else {
+            return;
+        };
+        let url = content.url().unwrap_or_else(|_| state.url.clone());
+        let (back, forward) = history_flags(content);
+        (url, back, forward)
     };
 
-    let state = state.borrow();
-    if let Some(content) = &state.content {
-        if let Err(error) = content.load_url(&url) {
-            eprintln!("[nav] load_url failed: {error}");
+    let mut state = state.borrow_mut();
+    if state.error.is_none() {
+        state.url = snapshot.0;
+    }
+    state.can_back = snapshot.1;
+    state.can_forward = snapshot.2;
+}
+
+fn leave_error_mode(state: &Rc<RefCell<AppState>>) {
+    let (width, height, had_error) = {
+        let mut state = state.borrow_mut();
+        if state.error.take().is_some() {
+            state.chrome_height = CHROME_COLLAPSED;
+            (state.width, state.height, true)
         } else {
-            println!("[nav] {url}");
+            (0, 0, false)
         }
+    };
+
+    if !had_error {
+        return;
+    }
+
+    let state = state.borrow();
+    if let Some(chrome) = &state.chrome {
+        let _ = chrome.set_bounds(rect(0, 0, width, CHROME_COLLAPSED));
+    }
+    if let Some(content) = &state.content {
+        let _ = content.set_visible(true);
+        let _ = content.set_bounds(rect(
+            0,
+            CHROME_COLLAPSED,
+            width,
+            height.saturating_sub(CHROME_COLLAPSED),
+        ));
     }
 }
 
-fn eval_content(state: &Rc<RefCell<AppState>>, script: &str) {
+fn navigate_to_url(state: &Rc<RefCell<AppState>>, url: String) {
+    let url = canonicalize_internal(url);
+    leave_error_mode(state);
+
+    {
+        let mut state = state.borrow_mut();
+        state.url = url.clone();
+        state.title.clear();
+        state.loading = true;
+        state.chrome_height = CHROME_COLLAPSED;
+
+        let width = state.width;
+        let height = state.height;
+        if let Some(chrome) = &state.chrome {
+            let _ = chrome.set_bounds(rect(0, 0, width, CHROME_COLLAPSED));
+        }
+        let load_result = if let Some(content) = &state.content {
+            let _ = content.set_visible(true);
+            let _ = content.set_bounds(rect(
+                0,
+                CHROME_COLLAPSED,
+                width,
+                height.saturating_sub(CHROME_COLLAPSED),
+            ));
+            let result = content.load_url(&url);
+            let _ = content.focus();
+            Some(result)
+        } else {
+            None
+        };
+
+        match load_result {
+            Some(Ok(())) => println!("[nav] {url}"),
+            Some(Err(error)) => {
+                eprintln!("[nav] load_url failed: {error}");
+                state.loading = false;
+            }
+            None => {
+                state.loading = false;
+            }
+        }
+    }
+
+    push_ui_state(state);
+}
+
+fn navigate_input(state: &Rc<RefCell<AppState>>, input: &str) {
+    let Some(target) = resolve_input(input) else {
+        return;
+    };
+    navigate_to_url(state, target.into_url());
+}
+
+fn show_error(state: &Rc<RefCell<AppState>>, error: ErrorInfo) {
+    let (width, height) = {
+        let mut state = state.borrow_mut();
+        state.error = Some(error);
+        state.loading = false;
+        state.title = "Не удалось открыть страницу".to_owned();
+        state.chrome_height = state.height;
+        (state.width, state.height)
+    };
+
+    let state_ref = state.borrow();
+    if let Some(content) = &state_ref.content {
+        let _ = content.set_visible(false);
+    }
+    if let Some(chrome) = &state_ref.chrome {
+        let _ = chrome.set_bounds(rect(0, 0, width, height));
+        let _ = chrome.focus();
+    }
+    drop(state_ref);
+
+    push_ui_state(state);
+}
+
+fn focus_address(state: &Rc<RefCell<AppState>>) {
+    let state = state.borrow();
+    if let Some(chrome) = &state.chrome {
+        let _ = chrome.focus();
+        let _ = chrome.evaluate_script(
+            "document.getElementById('address').focus(); \
+             document.getElementById('address').select();",
+        );
+    }
+}
+
+fn reload(state: &Rc<RefCell<AppState>>) {
+    if state.borrow().error.is_some() {
+        let url = state.borrow().url.clone();
+        navigate_to_url(state, url);
+        return;
+    }
+
+    let loaded = {
+        let state = state.borrow();
+        state
+            .content
+            .as_ref()
+            .map(|content| content.reload().is_ok())
+            .unwrap_or(false)
+    };
+    if loaded {
+        state.borrow_mut().loading = true;
+        push_ui_state(state);
+    }
+}
+
+fn stop(state: &Rc<RefCell<AppState>>) {
+    let state_ref = state.borrow();
+    if let Some(content) = &state_ref.content {
+        let _ = content.evaluate_script("window.stop()");
+    }
+    drop(state_ref);
+
+    state.borrow_mut().loading = false;
+    push_ui_state(state);
+}
+
+fn go_back(state: &Rc<RefCell<AppState>>) {
+    if !state.borrow().can_back {
+        return;
+    }
+    leave_error_mode(state);
+
+    let moved = {
+        let state = state.borrow();
+        state
+            .content
+            .as_ref()
+            .map(|content| content.go_back().is_ok())
+            .unwrap_or(false)
+    };
+    if moved {
+        state.borrow_mut().loading = true;
+        push_ui_state(state);
+    }
+}
+
+fn go_forward(state: &Rc<RefCell<AppState>>) {
+    if !state.borrow().can_forward {
+        return;
+    }
+    leave_error_mode(state);
+
+    let moved = {
+        let state = state.borrow();
+        state
+            .content
+            .as_ref()
+            .map(|content| content.go_forward().is_ok())
+            .unwrap_or(false)
+    };
+    if moved {
+        state.borrow_mut().loading = true;
+        push_ui_state(state);
+    }
+}
+
+fn open_devtools(state: &Rc<RefCell<AppState>>) {
     let state = state.borrow();
     if let Some(content) = &state.content {
-        let _ = content.evaluate_script(script);
+        content.open_devtools();
     }
 }
 
 fn toggle_overlay(state: &Rc<RefCell<AppState>>) {
     let mut state = state.borrow_mut();
+    if state.error.is_some() {
+        return;
+    }
+
     let expanded = state.chrome_height == CHROME_COLLAPSED;
     let height = if expanded {
         CHROME_EXPANDED
@@ -197,16 +465,19 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             mark("chrome-ready");
             state.borrow_mut().ready = true;
             send_app_info(state);
+            push_ui_state(state);
         }
         Some("ui.toggleOverlay") => toggle_overlay(state),
         Some("nav.go") => {
             if let Some(url) = message.get("url").and_then(|value| value.as_str()) {
-                navigate(state, url);
+                navigate_input(state, url);
             }
         }
-        Some("nav.back") => eval_content(state, "history.back()"),
-        Some("nav.forward") => eval_content(state, "history.forward()"),
-        Some("nav.reload") => eval_content(state, "location.reload()"),
+        Some("nav.back") => go_back(state),
+        Some("nav.forward") => go_forward(state),
+        Some("nav.reload") => reload(state),
+        Some("nav.stop") => stop(state),
+        Some("nav.retry") => reload(state),
         Some(other) => eprintln!("[ipc] unknown message: {other}"),
         None => eprintln!("[ipc] missing type"),
     }
@@ -224,7 +495,7 @@ fn install_accelerators(state: &Rc<RefCell<AppState>>) {
         AcceleratorKeyPressedEventHandler,
         Microsoft::Web::WebView2::Win32::{
             COREWEBVIEW2_KEY_EVENT_KIND, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
-            COREWEBVIEW2_PHYSICAL_KEY_STATUS,
+            COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN, COREWEBVIEW2_PHYSICAL_KEY_STATUS,
         },
     };
 
@@ -252,7 +523,9 @@ fn install_accelerators(state: &Rc<RefCell<AppState>>) {
             unsafe {
                 let _ = args.KeyEventKind(&mut kind);
             }
-            if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN {
+            if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+                && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
+            {
                 return Ok(());
             }
 
@@ -267,20 +540,36 @@ fn install_accelerators(state: &Rc<RefCell<AppState>>) {
             }
 
             let ctrl_down = unsafe { GetKeyState(0x11) } < 0;
-            let is_l_key = virtual_key == 0x4C || (ctrl_down && physical.ScanCode == 0x26);
+            let alt_down = unsafe { GetKeyState(0x12) } < 0;
+            let scan_code = physical.ScanCode;
 
-            if ctrl_down && is_l_key {
-                println!("[shortcut] Ctrl+L");
-                let state = state.borrow();
-                if let Some(chrome) = &state.chrome {
-                    let _ = chrome.focus();
-                    let _ = chrome.evaluate_script(
-                        "document.getElementById('address').focus(); \
-                         document.getElementById('address').select();",
-                    );
-                    unsafe {
-                        let _ = args.SetHandled(true);
-                    }
+            let handled = if ctrl_down && (virtual_key == 0x4C || scan_code == 0x26) {
+                focus_address(&state);
+                true
+            } else if (ctrl_down && (virtual_key == 0x52 || scan_code == 0x13))
+                || virtual_key == 0x74
+            {
+                reload(&state);
+                true
+            } else if virtual_key == 0x7B {
+                open_devtools(&state);
+                true
+            } else if alt_down && virtual_key == 0x25 {
+                go_back(&state);
+                true
+            } else if alt_down && virtual_key == 0x27 {
+                go_forward(&state);
+                true
+            } else if virtual_key == 0x1B && state.borrow().loading {
+                stop(&state);
+                true
+            } else {
+                false
+            };
+
+            if handled {
+                unsafe {
+                    let _ = args.SetHandled(true);
                 }
             }
 
@@ -295,11 +584,121 @@ fn install_accelerators(state: &Rc<RefCell<AppState>>) {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn install_navigation_handler(state: &Rc<RefCell<AppState>>) {
+    use webview2_com::{
+        Microsoft::Web::WebView2::Win32::{
+            COREWEBVIEW2_WEB_ERROR_STATUS, COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED,
+        },
+        NavigationCompletedEventHandler,
+    };
+    use windows_core::BOOL;
+
+    let webview = state
+        .borrow()
+        .content
+        .as_ref()
+        .map(|content| content.webview());
+    let Some(webview) = webview else {
+        return;
+    };
+
+    let state = Rc::clone(state);
+    let mut token = 0i64;
+    let handler = NavigationCompletedEventHandler::create(Box::new(move |_sender, args| {
+        let Some(args) = args else {
+            return Ok(());
+        };
+
+        let mut success = BOOL(0);
+        unsafe {
+            let _ = args.IsSuccess(&mut success);
+        }
+
+        if success.as_bool() {
+            if state.borrow().error.is_some() {
+                leave_error_mode(&state);
+            }
+            sync_from_content(&state);
+            state.borrow_mut().loading = false;
+            push_ui_state(&state);
+            return Ok(());
+        }
+
+        let mut status = COREWEBVIEW2_WEB_ERROR_STATUS(0);
+        unsafe {
+            let _ = args.WebErrorStatus(&mut status);
+        }
+
+        if status == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {
+            state.borrow_mut().loading = false;
+            push_ui_state(&state);
+            return Ok(());
+        }
+
+        let error = error_info(status);
+        eprintln!("[nav] failed: {}", error.code);
+        show_error(&state, error);
+        Ok(())
+    }));
+
+    unsafe {
+        if let Err(error) = webview.add_NavigationCompleted(&handler, &mut token) {
+            eprintln!("[nav] failed to register completion handler: {error}");
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn error_info(
+    status: webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_WEB_ERROR_STATUS,
+) -> ErrorInfo {
+    use webview2_com::Microsoft::Web::WebView2::Win32::*;
+
+    let (code, message) = if status == COREWEBVIEW2_WEB_ERROR_STATUS_HOST_NAME_NOT_RESOLVED {
+        (
+            "dns",
+            "Не удалось найти сайт. Проверьте адрес и подключение к интернету.",
+        )
+    } else if status == COREWEBVIEW2_WEB_ERROR_STATUS_DISCONNECTED {
+        ("offline", "Нет подключения к интернету.")
+    } else if status == COREWEBVIEW2_WEB_ERROR_STATUS_CANNOT_CONNECT
+        || status == COREWEBVIEW2_WEB_ERROR_STATUS_SERVER_UNREACHABLE
+    {
+        ("connect", "Не удалось подключиться к сайту.")
+    } else if status == COREWEBVIEW2_WEB_ERROR_STATUS_TIMEOUT {
+        ("timeout", "Сайт слишком долго не отвечает.")
+    } else if status == COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_COMMON_NAME_IS_INCORRECT
+        || status == COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_EXPIRED
+        || status == COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_IS_INVALID
+        || status == COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_REVOKED
+        || status == COREWEBVIEW2_WEB_ERROR_STATUS_CLIENT_CERTIFICATE_CONTAINS_ERRORS
+    {
+        (
+            "tls",
+            "Проблема с сертификатом сайта. Соединение небезопасно.",
+        )
+    } else if status == COREWEBVIEW2_WEB_ERROR_STATUS_CONNECTION_ABORTED
+        || status == COREWEBVIEW2_WEB_ERROR_STATUS_CONNECTION_RESET
+    {
+        ("connect", "Соединение с сайтом прервано.")
+    } else {
+        ("other", "Не удалось открыть страницу.")
+    };
+
+    ErrorInfo {
+        code: code.to_owned(),
+        message: message.to_owned(),
+    }
+}
+
 fn main() -> wry::Result<()> {
     START.get_or_init(Instant::now);
     mark("process");
 
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoopBuilder::<AppEvent>::with_user_event().build();
+    let proxy = event_loop.create_proxy();
+
     let window = WindowBuilder::new()
         .with_title("Rustle")
         .with_inner_size(TaoLogicalSize::new(1280.0, 800.0))
@@ -314,17 +713,62 @@ fn main() -> wry::Result<()> {
 
     let mut context = WebContext::new(Some(data_directory()));
 
-    let content = WebViewBuilder::new_with_web_context(&mut context)
-        .with_bounds(rect(
-            0,
-            CHROME_COLLAPSED,
-            size.width,
-            size.height.saturating_sub(CHROME_COLLAPSED),
-        ))
-        .with_browser_accelerator_keys(false)
-        .with_custom_protocol("rustle".into(), protocol_handler)
-        .with_url(NEWTAB_URL)
-        .build_as_child(&window)?;
+    let content = {
+        let navigation_state = Rc::clone(&state);
+        let title_state = Rc::clone(&state);
+        let load_state = Rc::clone(&state);
+
+        WebViewBuilder::new_with_web_context(&mut context)
+            .with_bounds(rect(
+                0,
+                CHROME_COLLAPSED,
+                size.width,
+                size.height.saturating_sub(CHROME_COLLAPSED),
+            ))
+            .with_browser_accelerator_keys(false)
+            .with_custom_protocol("rustle".into(), protocol_handler)
+            .with_navigation_handler(move |url| {
+                if url.starts_with("rustle://localhost/chrome") {
+                    return true;
+                }
+                {
+                    let mut state = navigation_state.borrow_mut();
+                    state.url = url;
+                    state.title.clear();
+                    state.loading = true;
+                    state.error = None;
+                }
+                push_ui_state(&navigation_state);
+                true
+            })
+            .with_document_title_changed_handler(move |title| {
+                {
+                    let mut state = title_state.borrow_mut();
+                    if state.error.is_none() {
+                        state.title = title;
+                    }
+                }
+                push_ui_state(&title_state);
+            })
+            .with_on_page_load_handler(move |event, _url| {
+                match event {
+                    PageLoadEvent::Started => {
+                        load_state.borrow_mut().loading = true;
+                    }
+                    PageLoadEvent::Finished => {
+                        sync_from_content(&load_state);
+                        load_state.borrow_mut().loading = false;
+                    }
+                }
+                push_ui_state(&load_state);
+            })
+            .with_new_window_req_handler(move |url, _features| {
+                let _ = proxy.send_event(AppEvent::OpenUrl(url));
+                NewWindowResponse::Deny
+            })
+            .with_url(NEWTAB_URL)
+            .build_as_child(&window)?
+    };
     mark("content");
     state.borrow_mut().content = Some(content);
 
@@ -338,10 +782,13 @@ fn main() -> wry::Result<()> {
         .build_as_child(&window)?;
     mark("chrome");
     state.borrow_mut().chrome = Some(chrome);
+
+    install_navigation_handler(&state);
     install_accelerators(&state);
 
     if state.borrow().ready {
         send_app_info(&state);
+        push_ui_state(&state);
     }
 
     window.set_visible(true);
@@ -351,8 +798,8 @@ fn main() -> wry::Result<()> {
         let _ = &context;
         *control_flow = ControlFlow::Wait;
 
-        if let Event::WindowEvent { event, .. } = event {
-            match event {
+        match event {
+            Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::Exit;
                 }
@@ -362,60 +809,35 @@ fn main() -> wry::Result<()> {
                     state.width = logical.width;
                     state.height = logical.height;
 
+                    let error_mode = state.error.is_some();
+                    if error_mode {
+                        state.chrome_height = state.height;
+                    }
+
                     let chrome_height = state.chrome_height;
                     if let Some(chrome) = &state.chrome {
                         let _ = chrome.set_bounds(rect(0, 0, logical.width, chrome_height));
                     }
                     if let Some(content) = &state.content {
-                        let _ = content.set_bounds(rect(
-                            0,
-                            CHROME_COLLAPSED,
-                            logical.width,
-                            logical.height.saturating_sub(CHROME_COLLAPSED),
-                        ));
+                        if error_mode {
+                            let _ = content.set_visible(false);
+                        } else {
+                            let _ = content.set_visible(true);
+                            let _ = content.set_bounds(rect(
+                                0,
+                                CHROME_COLLAPSED,
+                                logical.width,
+                                logical.height.saturating_sub(CHROME_COLLAPSED),
+                            ));
+                        }
                     }
                 }
                 _ => {}
+            },
+            Event::UserEvent(AppEvent::OpenUrl(url)) => {
+                navigate_to_url(&state, url);
             }
+            _ => {}
         }
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::normalize_url;
-
-    #[test]
-    fn keeps_absolute_https_url() {
-        assert_eq!(
-            normalize_url("https://example.com/path").as_deref(),
-            Some("https://example.com/path")
-        );
-    }
-
-    #[test]
-    fn adds_https_to_bare_host() {
-        assert_eq!(
-            normalize_url("example.com").as_deref(),
-            Some("https://example.com/")
-        );
-    }
-
-    #[test]
-    fn adds_https_to_localhost_with_port() {
-        assert_eq!(
-            normalize_url("localhost:8080").as_deref(),
-            Some("https://localhost:8080/")
-        );
-    }
-
-    #[test]
-    fn rejects_javascript_url() {
-        assert_eq!(normalize_url("javascript:alert(1)"), None);
-    }
-
-    #[test]
-    fn rejects_empty_input() {
-        assert_eq!(normalize_url("   "), None);
-    }
 }
