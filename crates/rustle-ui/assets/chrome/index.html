@@ -11,7 +11,7 @@
     <div class="tabs__items" id="tabs"></div>
     <button class="tab-new" type="button" id="new-tab" title="Новая вкладка (Ctrl+T)" aria-label="Новая вкладка">+</button>
     <span class="tabs__spacer"></span>
-    <span class="build-badge" id="about" title="Версия">M2</span>
+    <span class="build-badge" id="about" title="Версия">M2.1</span>
   </div>
 
   <div class="toolbar" role="toolbar" aria-label="Навигация">
@@ -53,6 +53,35 @@
         <button class="button button--primary" type="button" id="error-retry">Повторить</button>
         <button class="button" type="button" id="error-back">Назад</button>
       </div>
+    </div>
+  </section>
+
+  <section class="newtab-view" id="newtab-view">
+    <div class="newtab">
+      <div class="newtab__brand">Rustle</div>
+      <p class="newtab__tagline">Минималистичный браузер. Стадия M2.1.</p>
+
+      <form class="newtab__search" id="newtab-search" role="search">
+        <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
+        <button class="newtab__go" type="submit" aria-label="Найти">→</button>
+      </form>
+
+      <div class="newtab__shortcuts">
+        <button class="newtab__shortcut" type="button" data-url="https://github.com/d1m40fficial/rustle">
+          <span class="newtab__mark">GH</span>
+          <span>GitHub</span>
+        </button>
+        <button class="newtab__shortcut" type="button" data-url="https://www.youtube.com">
+          <span class="newtab__mark">YT</span>
+          <span>YouTube</span>
+        </button>
+        <button class="newtab__shortcut" type="button" data-url="https://ru.wikipedia.org">
+          <span class="newtab__mark">W</span>
+          <span>Википедия</span>
+        </button>
+      </div>
+
+      <p class="newtab__hint">Вкладки и восстановление сессии уже работают. История и настройки — дальше.</p>
     </div>
   </section>
 

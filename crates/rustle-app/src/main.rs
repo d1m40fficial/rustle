@@ -1,4 +1,6 @@
-//! Rustle M2: tabs, per-tab WebViews, session restore and tab shortcuts.
+//! Rustle M2.1: tabs, session restore, new-tab overlay and single instance.
+
+mod single_instance;
 
 use std::{
     borrow::Cow,
@@ -45,6 +47,7 @@ fn mark(label: &str) {
 #[derive(Debug)]
 enum AppEvent {
     OpenUrl(String),
+    Focus,
     NewTab,
     Activate(TabId),
     Close(TabId),
@@ -101,6 +104,7 @@ struct AppState {
     ready: bool,
     proxy: EventLoopProxy<AppEvent>,
     last_save: Instant,
+    stress_cycles: Option<u32>,
 }
 
 impl AppState {
@@ -124,6 +128,7 @@ impl AppState {
             ready: false,
             proxy,
             last_save: Instant::now(),
+            stress_cycles: None,
         }
     }
 
@@ -205,6 +210,18 @@ fn session_url(url: &str) -> String {
     } else {
         url.to_owned()
     }
+}
+
+fn is_newtab_url(url: &str) -> bool {
+    url.starts_with("rustle://newtab")
+        || url.contains("rustle://localhost/newtab")
+        || url.contains("rustle.localhost/newtab")
+}
+
+fn newtab_overlay(state: &AppState) -> bool {
+    state
+        .active_tab()
+        .is_some_and(|tab| tab.webview.is_none() && is_newtab_url(&tab.url))
 }
 
 fn fallback_title(url: &str) -> String {
@@ -353,6 +370,14 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                 )
             });
 
+        let mode = if error.is_some() {
+            "error"
+        } else if active.is_some_and(|tab| tab.webview.is_none() && is_newtab_url(&tab.url)) {
+            "newtab"
+        } else {
+            "web"
+        };
+
         let payload = json!({
             "tabs": tabs,
             "activeId": state.active.0,
@@ -363,6 +388,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
             "canGoBack": can_back,
             "canGoForward": can_forward,
             "error": error,
+            "mode": mode,
         });
 
         let window_title = if title == "Новая вкладка" || title == "Rustle" {
@@ -489,13 +515,18 @@ fn raise_chrome(state: &Rc<RefCell<AppState>>) {
 }
 
 fn apply_layout(state: &Rc<RefCell<AppState>>) {
-    let (width, height, active, error_mode) = {
+    let (width, height, active, overlay_mode) = {
         let state = state.borrow();
-        let error_mode = state.active_tab().is_some_and(|tab| tab.error.is_some());
-        (state.width, state.height, state.active, error_mode)
+        let overlay_mode =
+            state.active_tab().is_some_and(|tab| tab.error.is_some()) || newtab_overlay(&state);
+        (state.width, state.height, state.active, overlay_mode)
     };
 
-    let chrome_height = if error_mode { height } else { CHROME_COLLAPSED };
+    let chrome_height = if overlay_mode {
+        height
+    } else {
+        CHROME_COLLAPSED
+    };
 
     {
         let state = state.borrow();
@@ -507,7 +538,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             let Some(webview) = &tab.webview else {
                 continue;
             };
-            if error_mode {
+            if overlay_mode {
                 let _ = webview.set_visible(false);
             } else if tab.id == active {
                 let _ = webview.set_visible(true);
@@ -538,12 +569,17 @@ fn focus_address(state: &Rc<RefCell<AppState>>) {
 }
 
 fn focus_active_content(state: &Rc<RefCell<AppState>>) {
-    let state = state.borrow();
-    if state.active_tab().is_some_and(|tab| tab.error.is_some()) {
-        if let Some(chrome) = &state.chrome {
-            let _ = chrome.focus();
-        }
+    let overlay = {
+        let state = state.borrow();
+        state.active_tab().is_some_and(|tab| tab.error.is_some()) || newtab_overlay(&state)
+    };
+    if overlay {
+        focus_address(state);
         return;
+    }
+    let state = state.borrow();
+    if let Some(chrome) = &state.chrome {
+        let _ = chrome.evaluate_script("document.activeElement && document.activeElement.blur();");
     }
     if let Some(content) = state.active_tab().and_then(|tab| tab.webview.as_ref()) {
         let _ = content.focus();
@@ -609,7 +645,7 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
         let Some(tab) = state.tab(tab_id) else {
             return;
         };
-        if tab.webview.is_some() {
+        if tab.webview.is_some() || is_newtab_url(&tab.url) {
             return;
         }
         (
@@ -740,16 +776,19 @@ fn navigate_active(state: &Rc<RefCell<AppState>>, input: &str) {
 
 fn reload_active(state: &Rc<RefCell<AppState>>) {
     let active = state.borrow().active;
-    let (url, error) = {
+    let (url, error, has_webview) = {
         let state = state.borrow();
         let Some(tab) = state.tab(active) else {
             return;
         };
-        (tab.url.clone(), tab.error.is_some())
+        (tab.url.clone(), tab.error.is_some(), tab.webview.is_some())
     };
 
     if error {
         navigate_active(state, &url);
+        return;
+    }
+    if !has_webview {
         return;
     }
 
@@ -788,7 +827,7 @@ fn go_back_active(state: &Rc<RefCell<AppState>>) {
     if state
         .borrow()
         .tab(active)
-        .is_some_and(|tab| !tab.can_back || tab.error.is_some())
+        .is_some_and(|tab| !tab.can_back || tab.error.is_some() || tab.webview.is_none())
     {
         return;
     }
@@ -813,7 +852,7 @@ fn go_forward_active(state: &Rc<RefCell<AppState>>) {
     if state
         .borrow()
         .tab(active)
-        .is_some_and(|tab| !tab.can_forward || tab.error.is_some())
+        .is_some_and(|tab| !tab.can_forward || tab.error.is_some() || tab.webview.is_none())
     {
         return;
     }
@@ -1131,6 +1170,13 @@ fn new_tab(state: &Rc<RefCell<AppState>>) {
     focus_address(state);
 }
 
+fn open_external_url(state: &Rc<RefCell<AppState>>, input: &str) {
+    let Some(target) = resolve_input(input) else {
+        return;
+    };
+    open_tab(state, target.into_url());
+}
+
 fn open_tab(state: &Rc<RefCell<AppState>>, url: String) {
     let url = canonicalize_internal(url);
     let title = fallback_title(&url);
@@ -1318,6 +1364,28 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             state.borrow_mut().ready = true;
             send_app_info(state);
             push_ui_state(state);
+
+            let stress_cycles = state.borrow_mut().stress_cycles.take();
+            if let Some(cycles) = stress_cycles {
+                for _ in 0..cycles {
+                    new_tab(state);
+                    let active = state.borrow().active;
+                    close_tab(state, active);
+                }
+                println!("[stress] {cycles} tab cycles ok");
+                let _ = state.borrow().proxy.send_event(AppEvent::Exit);
+                return;
+            }
+
+            let overlay = {
+                let state = state.borrow();
+                state.active_tab().is_some_and(|tab| {
+                    tab.error.is_some() || (tab.webview.is_none() && is_newtab_url(&tab.url))
+                })
+            };
+            if overlay {
+                focus_address(state);
+            }
         }
         Some("nav.go") => {
             if let Some(url) = message.get("url").and_then(|value| value.as_str()) {
@@ -1397,8 +1465,26 @@ fn main() -> wry::Result<()> {
     START.get_or_init(Instant::now);
     mark("process");
 
+    if !single_instance::acquire() {
+        let payload = single_instance::payload_from_args();
+        let _ = single_instance::notify_existing(&payload);
+        return Ok(());
+    }
+
+    let startup_urls = single_instance::startup_urls();
     let event_loop = EventLoopBuilder::<AppEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
+
+    let ipc_proxy = proxy.clone();
+    let ipc = single_instance::start(move |message| {
+        for line in message.lines() {
+            if line == "__focus__" {
+                let _ = ipc_proxy.send_event(AppEvent::Focus);
+            } else {
+                let _ = ipc_proxy.send_event(AppEvent::OpenUrl(line.to_owned()));
+            }
+        }
+    });
 
     let window = Rc::new(
         WindowBuilder::new()
@@ -1411,6 +1497,11 @@ fn main() -> wry::Result<()> {
     );
     mark("window");
 
+    let stress_cycles = std::env::args().find_map(|arg| {
+        arg.strip_prefix("--stress-cycles=")
+            .and_then(|value| value.parse::<u32>().ok())
+    });
+
     let size = window.inner_size().to_logical::<u32>(window.scale_factor());
     let context = WebContext::new(Some(data_directory()));
     let state = Rc::new(RefCell::new(AppState::new(
@@ -1421,6 +1512,7 @@ fn main() -> wry::Result<()> {
         proxy.clone(),
     )));
 
+    state.borrow_mut().stress_cycles = stress_cycles;
     restore_session(&state, rustle_storage::load_session());
 
     let active = state.borrow().active;
@@ -1437,9 +1529,15 @@ fn main() -> wry::Result<()> {
     }
 
     window.set_visible(true);
+    window.set_focus();
     mark("visible");
 
+    for url in startup_urls {
+        let _ = proxy.send_event(AppEvent::OpenUrl(url));
+    }
+
     event_loop.run(move |event, _, control_flow| {
+        let _ = &ipc;
         *control_flow = ControlFlow::Wait;
 
         match event {
@@ -1460,7 +1558,22 @@ fn main() -> wry::Result<()> {
                 _ => {}
             },
             Event::UserEvent(AppEvent::OpenUrl(url)) => {
-                open_tab(&state, url);
+                open_external_url(&state, &url);
+            }
+            Event::UserEvent(AppEvent::Focus) => {
+                state.borrow().window.set_visible(true);
+                state.borrow().window.set_focus();
+                let overlay = {
+                    let state = state.borrow();
+                    state.active_tab().is_some_and(|tab| {
+                        tab.error.is_some() || (tab.webview.is_none() && is_newtab_url(&tab.url))
+                    })
+                };
+                if overlay {
+                    focus_address(&state);
+                } else {
+                    focus_active_content(&state);
+                }
             }
             Event::UserEvent(AppEvent::NewTab) => {
                 new_tab(&state);

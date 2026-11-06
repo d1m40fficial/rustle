@@ -76,19 +76,26 @@
       element.append(favicon, spinner, title, close);
       container.append(element);
     });
+
+    const active = container.querySelector(".tab--active");
+    if (active) {
+      active.scrollIntoView({ inline: "nearest", block: "nearest" });
+    }
   };
 
   const applyState = (payload) => {
     if (!payload || typeof payload !== "object") {
       return;
     }
+    const previousActive = current.activeId;
     current = { ...current, ...payload };
+    const activeChanged = payload.activeId !== previousActive;
 
     renderTabs(payload.tabs || [], payload.activeId || 0);
 
     const title = payload.title || "Rustle";
     const address = byId("address");
-    if (document.activeElement !== address) {
+    if (document.activeElement !== address || activeChanged) {
       address.value = payload.displayUrl || payload.url || "";
     }
 
@@ -103,8 +110,12 @@
     reload.title = loading ? "Остановить" : payload.error ? "Повторить" : "Обновить (F5)";
     reload.setAttribute("aria-label", reload.title);
 
+    const newtab = payload.mode === "newtab";
+    document.documentElement.classList.toggle("newtab-mode", newtab);
+
     const error = payload.error;
     document.documentElement.classList.toggle("error-mode", Boolean(error));
+    reload.disabled = newtab;
     if (error) {
       byId("error-code").textContent = "Ошибка · " + (error.code || "unknown");
       byId("error-message").textContent = error.message || "Не удалось открыть страницу.";
@@ -123,7 +134,7 @@
       if (message.type === "app.info") {
         const about = byId("about");
         if (about) {
-          about.textContent = "M2 · " + message.version;
+          about.textContent = "M2.1 · " + message.version;
           about.title = "Rustle " + message.version + " (" + message.platform + ")";
         }
       } else if (message.type === "state") {
@@ -136,6 +147,7 @@
     const address = byId("address");
 
     address.addEventListener("focus", () => address.select());
+    address.addEventListener("click", () => address.select());
     address.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -197,6 +209,23 @@
         send({ type: "nav.go", url });
       });
     }
+
+    const newtabForm = byId("newtab-search");
+    if (newtabForm) {
+      newtabForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const query = byId("newtab-query").value.trim();
+        if (query) {
+          send({ type: "nav.go", url: query });
+        }
+      });
+    }
+
+    document.querySelectorAll("[data-url]").forEach((button) => {
+      button.addEventListener("click", () => {
+        send({ type: "nav.go", url: button.dataset.url });
+      });
+    });
 
     const retry = byId("error-retry");
     if (retry) {
