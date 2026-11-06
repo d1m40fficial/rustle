@@ -75,6 +75,9 @@ fn run(proxy: EventLoopProxy<AppEvent>, receiver: mpsc::Receiver<StorageCommand>
         if let Ok(items) = storage.downloads() {
             let _ = proxy.send_event(AppEvent::DownloadsRestored(items));
         }
+        if let Ok(items) = storage.bookmarks() {
+            let _ = proxy.send_event(AppEvent::BookmarksRestored(items));
+        }
     }
 
     while let Ok(command) = receiver.recv() {

@@ -16,7 +16,9 @@ use std::{
 };
 
 use rustle_core::{ErrorInfo, TabId, VERSION, display_url, resolve_input, search_url};
-use rustle_storage::{DownloadRecord, SESSION_VERSION, Session, SessionTab, Settings};
+use rustle_storage::{
+    BookmarkEntry, DownloadRecord, SESSION_VERSION, Session, SessionTab, Settings,
+};
 use rustle_ui::{CSP, asset, mime_type};
 use serde_json::{Value, json};
 use storage_worker::{StorageCommand, StorageQuery};
@@ -71,6 +73,7 @@ enum AppEvent {
     StorageResponse { request_id: u64, payload: Value },
     DownloadsChanged,
     DownloadsRestored(Vec<DownloadRecord>),
+    BookmarksRestored(Vec<BookmarkEntry>),
     Focus,
     NewTab,
     Activate(TabId),
@@ -151,6 +154,7 @@ struct AppState {
     dropdown_open: bool,
     dropdown_height: u32,
     bookmark_bar: bool,
+    bookmarks: Vec<BookmarkEntry>,
     find_open: bool,
     downloads: Vec<DownloadEntry>,
     next_download_id: u64,
@@ -184,6 +188,7 @@ impl AppState {
             dropdown_open: false,
             dropdown_height: 360,
             bookmark_bar: false,
+            bookmarks: Vec::new(),
             find_open: false,
             downloads: Vec::new(),
             next_download_id: 1,
@@ -528,6 +533,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
             "theme": if state.settings.theme == "light" { "light" } else { "dark" },
             "private": state.private,
             "secure": url.starts_with("https://"),
+            "bookmarks": state.bookmarks,
             "settings": {
                 "searchEngine": state.settings.search_engine,
                 "theme": state.settings.theme,
@@ -2720,11 +2726,22 @@ fn main() -> wry::Result<()> {
         proxy.clone(),
     )));
 
+    let startup_bookmarks = if private {
+        Vec::new()
+    } else {
+        rustle_storage::Storage::open_default()
+            .ok()
+            .and_then(|storage| storage.bookmarks().ok())
+            .unwrap_or_default()
+    };
+
     {
         let mut state = state.borrow_mut();
         state.stress_cycles = stress_cycles;
         state.settings = settings.clone();
         state.private = private;
+        state.bookmark_bar = !startup_bookmarks.is_empty();
+        state.bookmarks = startup_bookmarks;
         state.storage = if private {
             None
         } else {
@@ -2822,6 +2839,16 @@ fn main() -> wry::Result<()> {
                 }
             }
             Event::UserEvent(AppEvent::DownloadsChanged) => {
+                push_ui_state(&state);
+            }
+            Event::UserEvent(AppEvent::BookmarksRestored(items)) => {
+                let visible = !items.is_empty();
+                {
+                    let mut state = state.borrow_mut();
+                    state.bookmarks = items;
+                    state.bookmark_bar = visible;
+                }
+                apply_layout(&state);
                 push_ui_state(&state);
             }
             Event::UserEvent(AppEvent::DownloadsRestored(records)) => {

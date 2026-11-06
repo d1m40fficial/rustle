@@ -374,7 +374,7 @@ impl Storage {
     pub fn bookmarks(&self) -> StorageResult<Vec<BookmarkEntry>> {
         let mut statement = self
             .conn
-            .prepare("SELECT id, url, title, created_at FROM bookmarks ORDER BY created_at DESC")?;
+            .prepare("SELECT id, url, title, folder, created_at FROM bookmarks ORDER BY folder, created_at DESC")?;
         let rows = statement.query_map([], |row| {
             Ok(BookmarkEntry {
                 id: row.get(0)?,
