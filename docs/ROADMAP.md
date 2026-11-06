@@ -23,10 +23,10 @@
 |---|---|---|
 | Windows | Windows 11 IoT Enterprise LTSC, 26100 | x64 |
 | WebView2 Runtime | установлен, 156.0.4314.58 | используется |
-| Rust | 1.99.1, host [[BT]]x86_64-pc-windows-gnu[[BT]] | установлен через Scoop ([[BT]]rustup-gnu[[BT]]) |
+| Rust | 1.99.1, host `x86_64-pc-windows-gnu` | установлен через Scoop (`rustup-gnu`) |
 | MinGW-w64 | 16.2.0 | установлен через Scoop |
 | Visual Studio 2026 | без C++ workload | не требуется для GNU-сборки; MSVC остаётся опцией |
-| GitHub CLI | 2.103.3 | авторизован как [[BT]]d1m40fficial[[BT]], scopes: repo, workflow |
+| GitHub CLI | 2.103.3 | авторизован как `d1m40fficial`, scopes: repo, workflow |
 | Git | 2.55 | установлен |
 | Node.js | 24.19.0 | есть; для сборки не обязателен |
 | Репозиторий | github.com/d1m40fficial/rustle | публичный, создан |
@@ -34,13 +34,13 @@
 
 ### 2.1 Как воспроизвести окружение
 
-[[BT]][[BT]][[BT]]powershell
+```powershell
 scoop install rustup-gnu mingw gh
-[[BT]][[BT]][[BT]]
+```
 
-Scoop прописывает PATH и [[BT]]CARGO_HOME[[BT]]/[[BT]]RUSTUP_HOME[[BT]] в пользовательские переменные;
-после установки нужен новый терминал. Для GNU-сборки обязателен [[BT]]WebView2Loader.dll[[BT]];
-он вендорен в [[BT]]assets/webview2/x64[[BT]] и копируется build.rs рядом с exe.
+Scoop прописывает PATH и `CARGO_HOME`/`RUSTUP_HOME` в пользовательские переменные;
+после установки нужен новый терминал. Для GNU-сборки обязателен `WebView2Loader.dll`;
+он вендорен в `assets/webview2/x64` и копируется build.rs рядом с exe.
 
 ## 3. Этапы
 
@@ -51,15 +51,15 @@ Scoop прописывает PATH и [[BT]]CARGO_HOME[[BT]]/[[BT]]RUSTUP_HOME[[B
 Задачи:
 
 - [x] Установить Rust GNU + MinGW через Scoop, собрать пример wry.
-- [x] Создать публичный репозиторий, лицензию, README, ТЗ. Защита [[BT]]main[[BT]] и шаблоны — после стабилизации CI.
-- [x] Создать cargo workspace: [[BT]]rustle-app[[BT]], [[BT]]rustle-core[[BT]], [[BT]]rustle-engine[[BT]], [[BT]]rustle-storage[[BT]], [[BT]]rustle-platform[[BT]], [[BT]]rustle-ui[[BT]].
+- [x] Создать публичный репозиторий, лицензию, README, ТЗ. Защита `main` и шаблоны — после стабилизации CI.
+- [x] Создать cargo workspace: `rustle-app`, `rustle-core`, `rustle-engine`, `rustle-storage`, `rustle-platform`, `rustle-ui`.
 - [x] Окно 1280×800: chrome WebView, content WebView, custom protocol, IPC.
 - [x] Трассировка старта: метки процесса, окна, content, chrome, chrome-ready.
 - [ ] Логирование через tracing и panic hook (сейчас простые startup-метки).
 - [x] CI workflow: fmt, clippy, test, release build; зелёный на windows-latest (run 42249192281).
-- [x] Спайк движка и документ [[BT]]docs/spikes/engine-capabilities.md[[BT]].
+- [x] Спайк движка и документ `docs/spikes/engine-capabilities.md`.
 - [x] ADR-0001 (движок), ADR-0002 (HTML-оболочка), ADR-0003 (GNU/WebView2Loader).
-- [x] Вендоринг [[BT]]WebView2Loader.dll[[BT]] и копирование build.rs.
+- [x] Вендоринг `WebView2Loader.dll` и копирование build.rs.
 - [x] Ctrl+L через AcceleratorKeyPressed; z-order chrome поверх контента проверен.
 
 Матрица спайка (каждый пункт: работает / работает с хаком / не работает):
@@ -98,8 +98,9 @@ Scoop прописывает PATH и [[BT]]CARGO_HOME[[BT]]/[[BT]]RUSTUP_HOME[[B
 | Ctrl+L из контента | работает, фокус в адресной строке, навигация подтверждена |
 | Z-order chrome поверх content | работает при создании content → chrome |
 
-Цель по памяти 250 МБ для одной вкладки при двух WebView не достигается; см.
-[[BT]]docs/spikes/engine-capabilities.md[[BT]]. Решение по бюджету — после release-замера.
+Цель 250 МБ по private bytes выполняется (172–186 МБ на новую вкладку).
+Сумма WorkingSet выше 378–425 МБ из-за общих страниц и используется только справочно.
+Подробности — в `docs/spikes/engine-capabilities.md`.
 
 **Решение G0.** Если критичные пункты (z-order, клавиатура, custom protocol, multi-webview) не решаются на wry, выбираем: патч wry / собственный хост на webview2-com (Windows) / CEF. До прохождения G0 не начинаем M1.
 
@@ -118,21 +119,33 @@ Scoop прописывает PATH и [[BT]]CARGO_HOME[[BT]]/[[BT]]RUSTUP_HOME[[B
 
 Задачи:
 
-- [ ] URL-парсер: схема, домен, IDN, localhost, IPv6, поиск; юнит-тесты.
-- [ ] Адресная строка: фокус, ввод, Enter, Esc, Alt+Enter, копирование.
-- [ ] Кнопки назад/вперёд/обновить/стоп; Alt+←/→, F5, Ctrl+R.
-- [ ] События движка: старт, commit, завершение, заголовок, URL, favicon.
-- [ ] Индикатор загрузки и прогресс.
-- [ ] Страницы ошибок (DNS, сеть, TLS), кнопка «Повторить».
-- [ ] Перехват target=_blank в новую вкладку (пока одна вкладка — замена текущей, затем M2).
-- [ ] DevTools по F12 для отладки.
-- [ ] Стартовые метрики в `docs/perf.md`.
+- [x] URL-парсер: схема, домен, localhost, IPv6, поиск; 8 юнит-тестов.
+- [x] Адресная строка: фокус, ввод, Enter, Esc, копирование. Alt+Enter — в M2 вместе с вкладками.
+- [x] Кнопки назад/вперёд/обновить/стоп; Alt+←/→, F5, Ctrl+R.
+- [x] События движка: старт, завершение, заголовок, URL, история (CanGoBack/CanGoForward).
+- [x] Индикатор загрузки: спиннер на вкладке и полоса прогресса.
+- [x] Ошибки DNS/сети/TLS: внутренний экран ошибки, «Повторить», «Назад».
+- [ ] target=_blank пока открывается в текущей вкладке; настоящая новая вкладка — M2.
+- [x] DevTools по F12 (включена feature devtools).
+- [x] Стартовые метрики в `docs/perf.md`.
+- [x] Favicon — буква домена; настоящий favicon — P1 после M2.
 
 Критерий готовности:
 
 - Открываются YouTube, Wikipedia, GitHub, Яндекс; работают ссылки, назад/вперёд, поиск из адресной строки.
 - Ошибки отображаются понятно, приложение не падает.
 - Старт ≤ 500 мс p50.
+
+### Фактические метрики M1 (2026-11-06)
+
+| Метрика | Значение |
+|---|---|
+| Chrome-ready, debug | 189–196 мс |
+| Chrome-ready, release | 238 мс |
+| Память newtab, release (private / WorkingSet) | 184.9 / 396.4 МБ, 9 процессов |
+| Бинарь release | 1.09 МБ |
+| Юнит-тесты | 8/8 |
+| Ручные сценарии | example.com, DuckDuckGo, DNS-ошибка, retry, back/forward, Alt+←/→, Ctrl+L, восстановление после ошибки |
 
 ---
 
