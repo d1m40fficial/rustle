@@ -38,6 +38,7 @@ fn mark(label: &str) {
 #[derive(Debug)]
 enum AppEvent {
     OpenUrl(String),
+    Title(String),
 }
 
 struct AppState {
@@ -53,6 +54,7 @@ struct AppState {
     can_back: bool,
     can_forward: bool,
     error: Option<ErrorInfo>,
+    nav_id: u64,
 }
 
 impl AppState {
@@ -70,6 +72,7 @@ impl AppState {
             can_back: false,
             can_forward: false,
             error: None,
+            nav_id: 0,
         }
     }
 }
@@ -585,12 +588,15 @@ fn install_accelerators(state: &Rc<RefCell<AppState>>) {
 }
 
 #[cfg(target_os = "windows")]
-fn install_navigation_handler(state: &Rc<RefCell<AppState>>) {
+fn install_navigation_handler(
+    state: &Rc<RefCell<AppState>>,
+    proxy: tao::event_loop::EventLoopProxy<AppEvent>,
+) {
     use webview2_com::{
         Microsoft::Web::WebView2::Win32::{
             COREWEBVIEW2_WEB_ERROR_STATUS, COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED,
         },
-        NavigationCompletedEventHandler,
+        NavigationCompletedEventHandler, NavigationStartingEventHandler,
     };
     use windows_core::BOOL;
 
@@ -603,6 +609,26 @@ fn install_navigation_handler(state: &Rc<RefCell<AppState>>) {
         return;
     };
 
+    let start_state = Rc::clone(state);
+    let mut start_token = 0i64;
+    let start_handler = NavigationStartingEventHandler::create(Box::new(move |_sender, args| {
+        let Some(args) = args else {
+            return Ok(());
+        };
+        let mut navigation_id = 0u64;
+        unsafe {
+            let _ = args.NavigationId(&mut navigation_id);
+        }
+        start_state.borrow_mut().nav_id = navigation_id;
+        Ok(())
+    }));
+
+    unsafe {
+        if let Err(error) = webview.add_NavigationStarting(&start_handler, &mut start_token) {
+            eprintln!("[nav] failed to register starting handler: {error}");
+        }
+    }
+
     let state = Rc::clone(state);
     let mut token = 0i64;
     let handler = NavigationCompletedEventHandler::create(Box::new(move |_sender, args| {
@@ -610,18 +636,38 @@ fn install_navigation_handler(state: &Rc<RefCell<AppState>>) {
             return Ok(());
         };
 
+        let mut navigation_id = 0u64;
+        unsafe {
+            let _ = args.NavigationId(&mut navigation_id);
+        }
+        let current_id = state.borrow().nav_id;
+        if current_id != 0 && navigation_id != 0 && navigation_id != current_id {
+            return Ok(());
+        }
+
         let mut success = BOOL(0);
         unsafe {
             let _ = args.IsSuccess(&mut success);
         }
 
         if success.as_bool() {
-            if state.borrow().error.is_some() {
+            let had_error = state.borrow().error.is_some();
+            if had_error {
                 leave_error_mode(&state);
+                state.borrow_mut().title.clear();
             }
             sync_from_content(&state);
             state.borrow_mut().loading = false;
             push_ui_state(&state);
+
+            let state_ref = state.borrow();
+            if let Some(content) = &state_ref.content {
+                let proxy = proxy.clone();
+                let _ = content.evaluate_script_with_callback("document.title", move |title| {
+                    let title = serde_json::from_str::<String>(&title).unwrap_or(title);
+                    let _ = proxy.send_event(AppEvent::Title(title));
+                });
+            }
             return Ok(());
         }
 
@@ -712,6 +758,7 @@ fn main() -> wry::Result<()> {
     let state = Rc::new(RefCell::new(AppState::new(size.width, size.height)));
 
     let mut context = WebContext::new(Some(data_directory()));
+    let new_window_proxy = proxy.clone();
 
     let content = {
         let navigation_state = Rc::clone(&state);
@@ -763,7 +810,7 @@ fn main() -> wry::Result<()> {
                 push_ui_state(&load_state);
             })
             .with_new_window_req_handler(move |url, _features| {
-                let _ = proxy.send_event(AppEvent::OpenUrl(url));
+                let _ = new_window_proxy.send_event(AppEvent::OpenUrl(url));
                 NewWindowResponse::Deny
             })
             .with_url(NEWTAB_URL)
@@ -783,7 +830,7 @@ fn main() -> wry::Result<()> {
     mark("chrome");
     state.borrow_mut().chrome = Some(chrome);
 
-    install_navigation_handler(&state);
+    install_navigation_handler(&state, proxy.clone());
     install_accelerators(&state);
 
     if state.borrow().ready {
@@ -836,6 +883,20 @@ fn main() -> wry::Result<()> {
             },
             Event::UserEvent(AppEvent::OpenUrl(url)) => {
                 navigate_to_url(&state, url);
+            }
+            Event::UserEvent(AppEvent::Title(title)) => {
+                let accepted = {
+                    let mut state = state.borrow_mut();
+                    if state.error.is_none() && !title.is_empty() {
+                        state.title = title;
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if accepted {
+                    push_ui_state(&state);
+                }
             }
             _ => {}
         }
