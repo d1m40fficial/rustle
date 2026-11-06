@@ -1735,6 +1735,7 @@ dependencies = [
  "tao",
  "url",
  "webview2-com",
+ "windows",
  "windows-core",
  "wry",
 ]
