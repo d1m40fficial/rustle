@@ -148,6 +148,7 @@ struct AppState {
     storage: Option<Sender<StorageCommand>>,
     dropdown_open: bool,
     dropdown_height: u32,
+    bookmark_bar: bool,
     downloads: Vec<DownloadEntry>,
     next_download_id: u64,
 }
@@ -178,6 +179,7 @@ impl AppState {
             storage: None,
             dropdown_open: false,
             dropdown_height: 360,
+            bookmark_bar: false,
             downloads: Vec::new(),
             next_download_id: 1,
         }
@@ -647,7 +649,7 @@ fn raise_chrome(state: &Rc<RefCell<AppState>>) {
 }
 
 fn apply_layout(state: &Rc<RefCell<AppState>>) {
-    let (width, height, active, overlay_mode, dropdown_open, dropdown_height) = {
+    let (width, height, active, overlay_mode, dropdown_open, dropdown_height, bookmark_bar) = {
         let state = state.borrow();
         let overlay_mode = state.active_tab().is_some_and(|tab| {
             tab.error.is_some() || newtab_overlay(&state) || internal_page(&tab.url).is_some()
@@ -659,15 +661,21 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             overlay_mode,
             state.dropdown_open,
             state.dropdown_height,
+            state.bookmark_bar,
         )
     };
 
+    let collapsed = if bookmark_bar {
+        CHROME_COLLAPSED + 30
+    } else {
+        CHROME_COLLAPSED
+    };
     let chrome_height = if overlay_mode {
         height
     } else if dropdown_open {
-        dropdown_height.clamp(CHROME_COLLAPSED, height)
+        (dropdown_height + collapsed.saturating_sub(CHROME_COLLAPSED)).clamp(collapsed, height)
     } else {
-        CHROME_COLLAPSED
+        collapsed
     };
 
     {
@@ -684,12 +692,8 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
                 let _ = webview.set_visible(false);
             } else if tab.id == active {
                 let _ = webview.set_visible(true);
-                let _ = webview.set_bounds(rect(
-                    0,
-                    CHROME_COLLAPSED,
-                    width,
-                    height.saturating_sub(CHROME_COLLAPSED),
-                ));
+                let _ =
+                    webview.set_bounds(rect(0, collapsed, width, height.saturating_sub(collapsed)));
             } else {
                 let _ = webview.set_visible(false);
             }
@@ -1955,6 +1959,158 @@ fn install_favicon_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, tab
 #[cfg(not(target_os = "windows"))]
 fn install_favicon_handler(_state: &Rc<RefCell<AppState>>, _webview: &WebView, _tab_id: TabId) {}
 
+fn respond_storage(state: &Rc<RefCell<AppState>>, request_id: u64, payload: Value) {
+    let _ = state.borrow().proxy.send_event(AppEvent::StorageResponse {
+        request_id,
+        payload,
+    });
+}
+
+fn decode_html(value: &str) -> String {
+    value
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+}
+
+fn parse_bookmarks_html(html: &str) -> Vec<(String, String, String)> {
+    let mut entries = Vec::new();
+    let mut folder = String::new();
+    let mut rest = html;
+    loop {
+        let lower = rest.to_ascii_lowercase();
+        let next_folder = lower.find("<h3");
+        let next_link = lower.find("<a ");
+        let take_folder = match (next_folder, next_link) {
+            (Some(f), Some(a)) => f < a,
+            (Some(_), None) => true,
+            (None, Some(_)) => false,
+            (None, None) => break,
+        };
+        if take_folder {
+            let start = next_folder.unwrap();
+            let after = &rest[start..];
+            if let Some(close) = after.to_ascii_lowercase().find("</h3>") {
+                let raw = &after[..close];
+                folder = raw
+                    .split_once('>')
+                    .map(|(_, text)| decode_html(text.trim()))
+                    .unwrap_or_default();
+                rest = &after[close + 5..];
+            } else {
+                break;
+            }
+            continue;
+        }
+        let start = next_link.unwrap();
+        let after = &rest[start..];
+        let Some(href_pos) = after.to_ascii_lowercase().find("href=") else {
+            rest = &after[5..];
+            continue;
+        };
+        let value_part = &after[href_pos + 5..];
+        let Some(quote) = value_part
+            .chars()
+            .next()
+            .filter(|ch| *ch == '"' || *ch == '\'')
+        else {
+            rest = &after[5..];
+            continue;
+        };
+        let value_part = &value_part[1..];
+        let Some(end_quote) = value_part.find(quote) else {
+            break;
+        };
+        let url = decode_html(&value_part[..end_quote]);
+        let after_url = &value_part[end_quote + 1..];
+        let Some(open_end) = after_url.find('>') else {
+            break;
+        };
+        let after_open = &after_url[open_end + 1..];
+        let Some(close) = after_open.to_ascii_lowercase().find("</a>") else {
+            break;
+        };
+        let title = decode_html(&after_open[..close]);
+        if url.starts_with("http://") || url.starts_with("https://") {
+            entries.push((url, title, folder.clone()));
+        }
+        rest = &after_open[close + 4..];
+    }
+    entries
+}
+
+fn import_bookmarks_file(state: &Rc<RefCell<AppState>>, request_id: u64) {
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter("HTML", &["html", "htm"])
+        .set_title("Импорт закладок")
+        .pick_file()
+    else {
+        respond_storage(state, request_id, json!({ "ok": true, "cancelled": true }));
+        return;
+    };
+    match fs::read_to_string(&path) {
+        Ok(html) => {
+            let entries = parse_bookmarks_html(&html);
+            if entries.is_empty() {
+                respond_storage(state, request_id, json!({ "ok": true, "imported": 0 }));
+            } else {
+                storage_query(state, request_id, StorageQuery::ImportBookmarks { entries });
+            }
+        }
+        Err(error) => respond_storage(
+            state,
+            request_id,
+            json!({ "ok": false, "error": error.to_string() }),
+        ),
+    }
+}
+
+fn export_bookmarks_file(state: &Rc<RefCell<AppState>>, request_id: u64, items: &[Value]) {
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter("HTML", &["html"])
+        .set_file_name("rustle-bookmarks.html")
+        .set_title("Экспорт закладок")
+        .save_file()
+    else {
+        respond_storage(state, request_id, json!({ "ok": true, "cancelled": true }));
+        return;
+    };
+    let mut html = String::from(
+        "<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<META HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html; charset=UTF-8\">\n<TITLE>Bookmarks</TITLE>\n<H1>Bookmarks</H1>\n<DL><p>\n",
+    );
+    let mut current_folder = String::new();
+    for item in items {
+        let folder = item.get("folder").and_then(Value::as_str).unwrap_or("");
+        if folder != current_folder {
+            if !current_folder.is_empty() {
+                html.push_str("</DL><p>\n");
+            }
+            current_folder = folder.to_owned();
+            if !current_folder.is_empty() {
+                html.push_str(&format!("<DT><H3>{}</H3>\n<DL><p>\n", current_folder));
+            }
+        }
+        let url = item.get("url").and_then(Value::as_str).unwrap_or("");
+        let title = item.get("title").and_then(Value::as_str).unwrap_or(url);
+        html.push_str(&format!("<DT><A HREF=\"{url}\">{title}</A>\n"));
+    }
+    if !current_folder.is_empty() {
+        html.push_str("</DL><p>\n");
+    }
+    html.push_str("</DL><p>\n");
+    let result = fs::write(&path, html);
+    respond_storage(
+        state,
+        request_id,
+        match result {
+            Ok(()) => json!({ "ok": true, "path": path.to_string_lossy() }),
+            Err(error) => json!({ "ok": false, "error": error.to_string() }),
+        },
+    );
+}
+
 fn storage_query(state: &Rc<RefCell<AppState>>, request_id: u64, query: StorageQuery) {
     if let Some(storage) = &state.borrow().storage {
         let _ = storage.send(StorageCommand::Query { request_id, query });
@@ -2089,6 +2245,37 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 );
             }
         }
+        Some("bookmarks.move") => {
+            if let (Some(request_id), Some(entry_id), Some(folder)) = (
+                message.get("id").and_then(|value| value.as_u64()),
+                message.get("entryId").and_then(|value| value.as_i64()),
+                message.get("folder").and_then(|value| value.as_str()),
+            ) {
+                storage_query(
+                    state,
+                    request_id,
+                    StorageQuery::MoveBookmark {
+                        id: entry_id,
+                        folder: folder.to_owned(),
+                    },
+                );
+            }
+        }
+        Some("bookmarks.import") => {
+            if let Some(request_id) = message.get("id").and_then(|value| value.as_u64()) {
+                import_bookmarks_file(state, request_id);
+            }
+        }
+        Some("bookmarks.export") => {
+            if let Some(request_id) = message.get("id").and_then(|value| value.as_u64()) {
+                let items = message
+                    .get("entries")
+                    .and_then(|value| value.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                export_bookmarks_file(state, request_id, &items);
+            }
+        }
         Some("bookmarks.remove") => {
             if let (Some(request_id), Some(entry_id)) = (
                 message.get("id").and_then(|value| value.as_u64()),
@@ -2113,6 +2300,21 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                     .and_then(|value| value.as_u64())
                     .unwrap_or(8) as u32;
                 storage_query(state, request_id, StorageQuery::Suggest { query, limit });
+            }
+        }
+        Some("ui.bookmarkBar") => {
+            let visible = message
+                .get("visible")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            let changed = {
+                let mut state = state.borrow_mut();
+                let changed = state.bookmark_bar != visible;
+                state.bookmark_bar = visible;
+                changed
+            };
+            if changed {
+                apply_layout(state);
             }
         }
         Some("ui.dropdown") => {

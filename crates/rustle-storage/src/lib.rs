@@ -40,6 +40,7 @@ pub struct BookmarkEntry {
     pub id: i64,
     pub url: String,
     pub title: String,
+    pub folder: String,
     pub created_at: i64,
 }
 
@@ -212,6 +213,7 @@ impl Storage {
                 id          INTEGER PRIMARY KEY,
                 url         TEXT NOT NULL UNIQUE,
                 title       TEXT NOT NULL DEFAULT '',
+                folder      TEXT NOT NULL DEFAULT '',
                 created_at  INTEGER NOT NULL
              );
              CREATE INDEX IF NOT EXISTS idx_bookmarks_created ON bookmarks(created_at DESC);
@@ -231,6 +233,11 @@ impl Storage {
                 value TEXT NOT NULL
              );",
         )?;
+
+        let _ = conn.execute(
+            "ALTER TABLE bookmarks ADD COLUMN folder TEXT NOT NULL DEFAULT ''",
+            [],
+        );
 
         Ok(Self { conn })
     }
@@ -373,7 +380,8 @@ impl Storage {
                 id: row.get(0)?,
                 url: row.get(1)?,
                 title: row.get(2)?,
-                created_at: row.get(3)?,
+                folder: row.get(3)?,
+                created_at: row.get(4)?,
             })
         })?;
         let mut entries = Vec::new();
@@ -381,6 +389,25 @@ impl Storage {
             entries.push(row?);
         }
         Ok(entries)
+    }
+
+    pub fn move_bookmark(&self, id: i64, folder: &str) -> StorageResult<()> {
+        self.conn.execute(
+            "UPDATE bookmarks SET folder = ?1 WHERE id = ?2",
+            params![folder, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn import_bookmarks(&self, entries: &[(String, String, String)]) -> StorageResult<()> {
+        for (url, title, folder) in entries {
+            self.conn.execute(
+                "INSERT OR IGNORE INTO bookmarks (url, title, folder, created_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![url, title, folder, unix_now()],
+            )?;
+        }
+        Ok(())
     }
 
     pub fn is_bookmarked(&self, url: &str) -> StorageResult<bool> {
@@ -403,7 +430,7 @@ impl Storage {
             Ok(false)
         } else {
             self.conn.execute(
-                "INSERT INTO bookmarks (url, title, created_at) VALUES (?1, ?2, ?3)",
+                "INSERT INTO bookmarks (url, title, folder, created_at) VALUES (?1, ?2, '', ?3)",
                 params![url, title, unix_now()],
             )?;
             Ok(true)

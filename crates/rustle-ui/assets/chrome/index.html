@@ -53,6 +53,8 @@
     </button>
   </div>
 
+  <div class="bookmark-bar" id="bookmark-bar" hidden></div>
+
   <div class="progress" id="progress" aria-hidden="true"></div>
 
   <div class="suggestions" id="suggestions" hidden></div>
@@ -131,6 +133,10 @@
       </nav>
     </header>
     <p class="page-hint">Добавляйте страницы звездой в адресной строке.</p>
+    <div class="page-toolbar">
+      <button id="bookmarks-import" class="button" type="button">Импорт HTML</button>
+      <button id="bookmarks-export" class="button" type="button">Экспорт HTML</button>
+    </div>
     <div id="bookmarks-list" class="page-list" aria-live="polite"></div>
   </section>
 

@@ -288,19 +288,36 @@
         list.append(emptyRow("Закладок пока нет."));
         return;
       }
+      const groups = new Map();
       items.forEach((item) => {
-        list.append(
-          listRow(
-            item.title || item.url,
-            item.url,
-            formatTime(item.created_at),
-            () => send({ type: "nav.go", url: item.url }),
-            async () => {
-              await request("bookmarks.remove", { entryId: item.id });
-              loadBookmarks();
-            },
-          ),
-        );
+        const folder = item.folder || "";
+        if (!groups.has(folder)) {
+          groups.set(folder, []);
+        }
+        groups.get(folder).push(item);
+      });
+      groups.forEach((group, folder) => {
+        if (folder) {
+          const heading = document.createElement("div");
+          heading.className = "bookmark-folder";
+          heading.textContent = folder;
+          list.append(heading);
+        }
+        group.forEach((item) => {
+          list.append(
+            listRow(
+              item.title || item.url,
+              item.url,
+              formatTime(item.created_at),
+              () => send({ type: "nav.go", url: item.url }),
+              async () => {
+                await request("bookmarks.remove", { entryId: item.id });
+                loadBookmarks();
+                loadBookmarkBar();
+              },
+            ),
+          );
+        });
       });
     } catch (error) {
       list.replaceChildren(emptyRow("Не удалось загрузить закладки."));
@@ -414,6 +431,41 @@
     }
   };
 
+  const renderBookmarkBar = (items) => {
+    const bar = byId("bookmark-bar");
+    if (!bar) {
+      return;
+    }
+    bar.replaceChildren();
+    if (!items.length) {
+      bar.hidden = true;
+      document.documentElement.style.setProperty("--chrome-offset", "78px");
+      send({ type: "ui.bookmarkBar", visible: false });
+      return;
+    }
+    bar.hidden = false;
+    document.documentElement.style.setProperty("--chrome-offset", "108px");
+    items.slice(0, 16).forEach((item) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "bookmark-bar__item";
+      button.textContent = item.title || item.url;
+      button.title = item.url;
+      button.addEventListener("click", () => send({ type: "nav.go", url: item.url }));
+      bar.append(button);
+    });
+    send({ type: "ui.bookmarkBar", visible: true });
+  };
+
+  const loadBookmarkBar = async () => {
+    try {
+      const data = await request("bookmarks.list");
+      renderBookmarkBar(data.items || []);
+    } catch (error) {
+      console.warn(error);
+    }
+  };
+
   const showInternalPage = (page) => {
     document.querySelectorAll(".internal-page").forEach((section) => {
       section.hidden = section.dataset.page !== page;
@@ -422,6 +474,7 @@
       loadHistory(byId("history-search")?.value.trim() || "");
     } else if (page === "bookmarks") {
       loadBookmarks();
+      loadBookmarkBar();
     } else if (page === "settings") {
       populateSettings();
     } else if (page === "downloads") {
@@ -673,6 +726,7 @@
           });
           bookmark.classList.toggle("is-active", Boolean(result.bookmarked));
           bookmark.title = result.bookmarked ? "Убрать из закладок" : "Добавить в закладки";
+          loadBookmarkBar();
         } catch (error) {
           console.warn(error);
         }
@@ -695,6 +749,23 @@
         send({ type: "nav.go", url: button.dataset.url });
       });
     });
+
+    const importBookmarks = byId("bookmarks-import");
+    if (importBookmarks) {
+      importBookmarks.addEventListener("click", async () => {
+        await request("bookmarks.import");
+        loadBookmarks();
+        loadBookmarkBar();
+      });
+    }
+
+    const exportBookmarks = byId("bookmarks-export");
+    if (exportBookmarks) {
+      exportBookmarks.addEventListener("click", async () => {
+        const data = await request("bookmarks.list");
+        await request("bookmarks.export", { entries: data.items || [] });
+      });
+    }
 
     const historySearch = byId("history-search");
     if (historySearch) {
@@ -751,6 +822,7 @@
     }
 
     send({ type: "chrome.ready" });
+    loadBookmarkBar();
   };
 
   if (document.readyState === "loading") {

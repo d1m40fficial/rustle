@@ -11,6 +11,7 @@ name = "rustle"
 path = "src/main.rs"
 
 [dependencies]
+rfd = "0.15"
 rustle-core.workspace = true
 rustle-storage.workspace = true
 rustle-ui.workspace = true

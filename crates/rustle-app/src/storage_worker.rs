@@ -27,13 +27,33 @@ pub enum StorageCommand {
 }
 
 pub enum StorageQuery {
-    History { query: String, limit: u32 },
+    History {
+        query: String,
+        limit: u32,
+    },
     Bookmarks,
-    Suggest { query: String, limit: u32 },
-    DeleteHistory { id: i64 },
+    Suggest {
+        query: String,
+        limit: u32,
+    },
+    DeleteHistory {
+        id: i64,
+    },
     ClearHistory,
-    ToggleBookmark { url: String, title: String },
-    RemoveBookmark { id: i64 },
+    ToggleBookmark {
+        url: String,
+        title: String,
+    },
+    RemoveBookmark {
+        id: i64,
+    },
+    MoveBookmark {
+        id: i64,
+        folder: String,
+    },
+    ImportBookmarks {
+        entries: Vec<(String, String, String)>,
+    },
 }
 
 pub fn spawn(proxy: EventLoopProxy<AppEvent>) -> Option<Sender<StorageCommand>> {
@@ -122,6 +142,18 @@ fn run(proxy: EventLoopProxy<AppEvent>, receiver: mpsc::Receiver<StorageCommand>
                     }
                     (Some(storage), StorageQuery::RemoveBookmark { id }) => {
                         match storage.remove_bookmark(id) {
+                            Ok(()) => json!({ "ok": true }),
+                            Err(error) => error_payload(&error),
+                        }
+                    }
+                    (Some(storage), StorageQuery::MoveBookmark { id, folder }) => {
+                        match storage.move_bookmark(id, &folder) {
+                            Ok(()) => json!({ "ok": true }),
+                            Err(error) => error_payload(&error),
+                        }
+                    }
+                    (Some(storage), StorageQuery::ImportBookmarks { entries }) => {
+                        match storage.import_bookmarks(&entries) {
                             Ok(()) => json!({ "ok": true }),
                             Err(error) => error_payload(&error),
                         }
