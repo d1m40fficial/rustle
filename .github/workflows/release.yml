@@ -23,6 +23,13 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      - name: Install WebView2 Runtime
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:TEMP "MicrosoftEdgeWebView2Setup.exe"
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $installer -UseBasicParsing
+          Start-Process $installer -ArgumentList "/silent","/install" -Wait
+
       - name: Install Inno Setup
         shell: pwsh
         run: |
