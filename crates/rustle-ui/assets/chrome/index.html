@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rustle</title>
+  <link rel="stylesheet" href="chrome.css">
+</head>
+<body>
+  <div class="tabs" role="tablist" aria-label="Вкладки">
+    <div class="tab tab--active" role="tab" aria-selected="true" tabindex="0">
+      <span class="tab__favicon" aria-hidden="true"></span>
+      <span class="tab__title">Новая вкладка</span>
+    </div>
+    <button class="tab-new" type="button" title="Новая вкладка (Ctrl+T)" aria-label="Новая вкладка">+</button>
+    <span class="tabs__spacer"></span>
+    <span class="build-badge" id="about" title="Версия">M0</span>
+    <button class="chrome-btn" type="button" id="overlay-toggle" title="Проверка перекрытия" aria-label="Проверка перекрытия">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+
+  <div class="toolbar" role="toolbar" aria-label="Навигация">
+    <button class="chrome-btn" type="button" data-cmd="nav.back" title="Назад (Alt+←)" aria-label="Назад">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button class="chrome-btn" type="button" data-cmd="nav.forward" title="Вперёд (Alt+→)" aria-label="Вперёд">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button class="chrome-btn" type="button" data-cmd="nav.reload" title="Обновить (F5)" aria-label="Обновить">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20 4v7h-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+
+    <div class="address">
+      <span class="address__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M7 10V7a5 5 0 0 1 10 0v3" fill="none" stroke="currentColor" stroke-width="2"/><rect x="5" y="10" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </span>
+      <input id="address" class="address__input" type="text" value="rustle://newtab" spellcheck="false" autocomplete="off" aria-label="Адресная строка">
+    </div>
+
+    <button class="chrome-btn" type="button" id="go" title="Перейти" aria-label="Перейти">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button class="chrome-btn" type="button" title="Меню" aria-label="Меню">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="19" r="1.6" fill="currentColor"/></svg>
+    </button>
+  </div>
+
+  <section class="overlay" id="overlay" aria-label="Проверка перекрытия">
+    <div class="overlay__card">
+      <p class="overlay__eyebrow">M0 · spike</p>
+      <h1 class="overlay__title">Chrome поверх контента</h1>
+      <p class="overlay__text">Если вы видите эту панель, chrome WebView перекрывает content WebView и z-order работает. Это база для выпадающих подсказок адресной строки.</p>
+      <button class="overlay__button" type="button" id="overlay-close">Свернуть</button>
+    </div>
+  </section>
+
+  <script src="chrome.js"></script>
+</body>
+</html>

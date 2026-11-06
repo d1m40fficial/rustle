@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Новая вкладка</title>
+  <link rel="stylesheet" href="newtab.css">
+</head>
+<body>
+  <main class="page">
+    <div class="brand">Rustle</div>
+    <p class="tagline">Минималистичный браузер. Стадия M0.</p>
+
+    <form class="search" id="search" role="search">
+      <input class="search__input" id="q" type="text" placeholder="Поиск или адрес" autocomplete="off" autofocus>
+      <button class="search__button" type="submit" aria-label="Найти">→</button>
+    </form>
+
+    <nav class="shortcuts" aria-label="Быстрые ссылки">
+      <a class="shortcut" href="https://github.com/d1m40fficial/rustle">
+        <span class="shortcut__mark">GH</span>
+        <span>GitHub</span>
+      </a>
+      <a class="shortcut" href="https://www.youtube.com">
+        <span class="shortcut__mark">YT</span>
+        <span>YouTube</span>
+      </a>
+      <a class="shortcut" href="https://ru.wikipedia.org">
+        <span class="shortcut__mark">W</span>
+        <span>Википедия</span>
+      </a>
+    </nav>
+
+    <p class="hint">Введите адрес в строке сверху. Вкладки, история и настройки появятся на следующих этапах.</p>
+  </main>
+  <script src="newtab.js"></script>
+</body>
+</html>

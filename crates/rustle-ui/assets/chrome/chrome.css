@@ -1,0 +1,243 @@
+:root {
+  --bg: #202124;
+  --bg-elevated: #292a2d;
+  --bg-hover: #303134;
+  --border: #3c4043;
+  --border-strong: #5f6368;
+  --text: #e8eaed;
+  --text-muted: #9aa0a6;
+  --accent: #8ab4f8;
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.2 "Segoe UI", system-ui, sans-serif;
+  user-select: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.tabs {
+  height: 34px;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 0 8px;
+  background: var(--bg);
+}
+
+.tab {
+  height: 30px;
+  min-width: 140px;
+  max-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-radius: 8px 8px 0 0;
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.tab--active {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.tab__favicon {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #4c566a;
+  flex: 0 0 auto;
+}
+
+.tab__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-new {
+  width: 28px;
+  height: 28px;
+  margin-bottom: 1px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tab-new:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.tabs__spacer {
+  flex: 1;
+}
+
+.build-badge {
+  align-self: center;
+  margin-right: 4px;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.toolbar {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  background: var(--bg-elevated);
+}
+
+.chrome-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.chrome-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.chrome-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.address {
+  flex: 1;
+  min-width: 120px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 6px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.address:focus-within {
+  border-color: var(--accent);
+}
+
+.address__icon {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+
+.address__icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.address__input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  user-select: text;
+}
+
+.address__input::selection {
+  background: #394457;
+}
+
+.overlay {
+  display: none;
+  height: calc(100vh - 78px);
+  padding: 18px;
+  background: var(--bg);
+}
+
+html.expanded .overlay {
+  display: block;
+}
+
+.overlay__card {
+  max-width: 560px;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+}
+
+.overlay__eyebrow {
+  margin: 0 0 8px;
+  color: var(--accent);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.overlay__title {
+  margin: 0 0 10px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.overlay__text {
+  margin: 0 0 18px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  user-select: text;
+}
+
+.overlay__button {
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.overlay__button:hover {
+  background: var(--bg-hover);
+}
