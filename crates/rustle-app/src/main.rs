@@ -2816,9 +2816,50 @@ fn schedule_private_cleanup(root: PathBuf) {
     let _ = ProcessCommand::new("cmd").args(["/C", &command]).spawn();
 }
 
+#[cfg(target_os = "windows")]
+fn webview2_runtime_installed() -> bool {
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+
+    const CLIENT: &str = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+    let paths = [
+        format!("SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{CLIENT}"),
+        format!("SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\{CLIENT}"),
+    ];
+    for hive in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
+        let root = RegKey::predef(hive);
+        for path in &paths {
+            if let Ok(key) = root.open_subkey(path) {
+                if let Ok(version) = key.get_value::<String, _>("pv") {
+                    if !version.trim().is_empty() {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
+fn webview2_runtime_installed() -> bool {
+    true
+}
+
 fn main() -> wry::Result<()> {
     START.get_or_init(Instant::now);
     mark("process");
+
+    if !webview2_runtime_installed() {
+        rfd::MessageDialog::new()
+            .set_title("Rustle")
+            .set_description(
+                "Для работы Rustle нужен Microsoft Edge WebView2 Runtime.\n\nУстановите его с https://developer.microsoft.com/microsoft-edge/webview2/",
+            )
+            .set_level(rfd::MessageLevel::Error)
+            .show();
+        return Ok(());
+    }
 
     let private = std::env::args().any(|arg| arg == "--private");
     if private {

@@ -547,7 +547,7 @@
         about.textContent = "PRIVATE";
         about.title = "Приватное окно";
       } else if (current.version) {
-        about.textContent = "M3 · " + current.version;
+        about.textContent = "v" + current.version;
         about.title = "Rustle " + current.version;
       }
     }
@@ -624,7 +624,7 @@
       if (message.type === "app.info") {
         const about = byId("about");
         if (about) {
-          about.textContent = "M3 · " + message.version;
+          about.textContent = "v" + message.version;
           about.title = "Rustle " + message.version + " (" + message.platform + ")";
         }
         current.version = message.version;

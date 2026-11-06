@@ -20,7 +20,11 @@ tao.workspace = true
 url.workspace = true
 wry.workspace = true
 
+[build-dependencies]
+embed-resource = "3"
+
 [target.'cfg(windows)'.dependencies]
+winreg = "0.56"
 windows = { version = "0.62", features = ["Win32_System_Com"] }
 webview2-com.workspace = true
 windows-core.workspace = true

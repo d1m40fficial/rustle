@@ -2,6 +2,11 @@ use std::{env, fs, path::PathBuf};
 
 fn main() {
     println!("cargo:rerun-if-changed=../../assets/webview2/x64/WebView2Loader.dll");
+    println!("cargo:rerun-if-changed=assets/rustle.rc");
+    println!("cargo:rerun-if-changed=assets/rustle.ico");
+
+    #[cfg(windows)]
+    let _ = embed_resource::compile("assets/rustle.rc", embed_resource::NONE);
 
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
