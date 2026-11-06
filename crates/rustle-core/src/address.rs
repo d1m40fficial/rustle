@@ -91,7 +91,7 @@ pub fn display_url(url: &str) -> String {
             if path.starts_with("newtab") {
                 return "rustle://newtab".to_owned();
             }
-            for page in ["history", "bookmarks", "settings", "about"] {
+            for page in ["history", "bookmarks", "settings", "about", "downloads"] {
                 if path.starts_with(page) {
                     return format!("rustle://{page}");
                 }

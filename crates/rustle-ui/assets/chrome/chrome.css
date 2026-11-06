@@ -797,7 +797,69 @@ html[data-theme="light"] .newtab__mark {
   margin: 0;
 }
 
+.download-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(160px, 0.8fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.download-row:hover {
+  background: var(--bg-hover);
+}
+
+.download-row__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.download-row__info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.download-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.download-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s linear;
+}
+
+.download-row__status {
+  min-width: 52px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.download-row__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.download-row__actions .button {
+  padding: 0 10px;
+}
+
 @media (max-width: 760px) {
+  .download-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
   .internal-page {
     padding: 20px 16px 32px;
   }

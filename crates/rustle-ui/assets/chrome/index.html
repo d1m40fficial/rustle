@@ -48,6 +48,9 @@
     <button class="chrome-btn" type="button" data-nav="rustle://settings" title="Настройки" aria-label="Настройки">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     </button>
+    <button class="chrome-btn" type="button" data-nav="rustle://downloads" title="Загрузки" aria-label="Загрузки">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
   </div>
 
   <div class="progress" id="progress" aria-hidden="true"></div>
@@ -205,6 +208,22 @@
         <dt>Исходники</dt><dd><button class="link" type="button" data-nav="https://github.com/d1m40fficial/rustle">github.com/d1m40fficial/rustle</button></dd>
       </dl>
     </div>
+  </section>
+
+  <section class="internal-page" id="page-downloads" data-page="downloads" hidden>
+    <header class="page-head">
+      <div>
+        <p class="page-eyebrow">Файлы</p>
+        <h1>Загрузки</h1>
+      </div>
+      <nav class="page-nav">
+        <button type="button" data-nav="rustle://history">История</button>
+        <button type="button" data-nav="rustle://bookmarks">Закладки</button>
+        <button type="button" data-nav="rustle://settings">Настройки</button>
+      </nav>
+    </header>
+    <p class="page-hint">Файлы сохраняются в папку «Загрузки». Отсюда можно открыть файл или папку.</p>
+    <div id="downloads-list" class="page-list" aria-live="polite"></div>
   </section>
 
   <script src="chrome.js"></script>

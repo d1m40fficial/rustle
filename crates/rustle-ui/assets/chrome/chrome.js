@@ -295,6 +295,92 @@
     }
   };
 
+  const formatBytes = (bytes) => {
+    if (!bytes) {
+      return "";
+    }
+    const units = ["Б", "КБ", "МБ", "ГБ"];
+    let value = bytes;
+    let index = 0;
+    while (value >= 1024 && index < units.length - 1) {
+      value /= 1024;
+      index += 1;
+    }
+    return value.toFixed(index ? 1 : 0) + " " + units[index];
+  };
+
+  const renderDownloads = (items = current.downloads || []) => {
+    const list = byId("downloads-list");
+    if (!list) {
+      return;
+    }
+    list.replaceChildren();
+    if (!items.length) {
+      list.append(emptyRow("Загрузок пока нет."));
+      return;
+    }
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "download-row";
+      const main = document.createElement("div");
+      main.className = "download-row__main";
+      const title = document.createElement("span");
+      title.className = "page-row__title";
+      const name = (item.path || "").split(/[\\/]/).pop() || item.url;
+      title.textContent = name;
+      const url = document.createElement("span");
+      url.className = "page-row__url";
+      url.textContent = item.url;
+      main.append(title, url);
+
+      const info = document.createElement("div");
+      info.className = "download-row__info";
+      const percent =
+        item.total > 0 ? Math.min(100, Math.round((item.received / item.total) * 100)) : 0;
+      const bar = document.createElement("div");
+      bar.className = "download-bar";
+      const fill = document.createElement("span");
+      fill.style.width = percent + "%";
+      bar.append(fill);
+      const status = document.createElement("span");
+      status.className = "download-row__status";
+      const labels = {
+        progress: item.total > 0 ? percent + "%" : formatBytes(item.received),
+        completed: "Готово",
+        interrupted: "Прервано",
+        cancelled: "Отменено",
+      };
+      status.textContent = labels[item.state] || item.state;
+      info.append(bar, status);
+
+      const actions = document.createElement("div");
+      actions.className = "download-row__actions";
+      if (item.state === "progress") {
+        const cancel = document.createElement("button");
+        cancel.className = "button";
+        cancel.type = "button";
+        cancel.textContent = "Отменить";
+        cancel.addEventListener("click", () => send({ type: "downloads.cancel", id: item.id }));
+        actions.append(cancel);
+      } else {
+        const open = document.createElement("button");
+        open.className = "button";
+        open.type = "button";
+        open.textContent = "Открыть";
+        open.addEventListener("click", () => send({ type: "downloads.open", id: item.id }));
+        const reveal = document.createElement("button");
+        reveal.className = "button";
+        reveal.type = "button";
+        reveal.textContent = "Папка";
+        reveal.addEventListener("click", () => send({ type: "downloads.reveal", id: item.id }));
+        actions.append(open, reveal);
+      }
+
+      row.append(main, info, actions);
+      list.append(row);
+    });
+  };
+
   const populateSettings = () => {
     const settings = current.settings || {};
     const engine = byId("setting-engine");
@@ -325,6 +411,8 @@
       loadBookmarks();
     } else if (page === "settings") {
       populateSettings();
+    } else if (page === "downloads") {
+      renderDownloads();
     } else if (page === "about") {
       const version = byId("about-version");
       if (version) {
@@ -382,6 +470,8 @@
       if (page !== currentInternalPage) {
         currentInternalPage = page;
         showInternalPage(page);
+      } else if (page === "downloads") {
+        renderDownloads();
       }
     } else {
       currentInternalPage = "";

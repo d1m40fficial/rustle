@@ -6,7 +6,9 @@ mod storage_worker;
 use std::{
     borrow::Cow,
     cell::RefCell,
-    path::PathBuf,
+    fs,
+    path::{Path, PathBuf},
+    process::Command as ProcessCommand,
     rc::Rc,
     sync::OnceLock,
     sync::mpsc::Sender,
@@ -34,6 +36,18 @@ use wry::{
 #[cfg(target_os = "windows")]
 use wry::{WebViewBuilderExtWindows, WebViewExtWindows};
 
+#[cfg(target_os = "windows")]
+use webview2_com::{
+    BytesReceivedChangedEventHandler, DownloadStartingEventHandler,
+    Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED, COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS,
+        COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED, ICoreWebView2_4, ICoreWebView2DownloadOperation,
+    },
+    StateChangedEventHandler,
+};
+#[cfg(target_os = "windows")]
+use windows_core::{Interface, PCWSTR};
+
 const CHROME_COLLAPSED: u32 = 78;
 const CHROME_URL: &str = "rustle://localhost/chrome/index.html";
 const NEWTAB_URL: &str = "rustle://localhost/newtab/index.html";
@@ -51,6 +65,7 @@ fn mark(label: &str) {
 enum AppEvent {
     OpenUrl(String),
     StorageResponse { request_id: u64, payload: Value },
+    DownloadsChanged,
     Focus,
     NewTab,
     Activate(TabId),
@@ -97,6 +112,17 @@ struct ClosedTab {
     title: String,
 }
 
+struct DownloadEntry {
+    id: u64,
+    url: String,
+    path: String,
+    received: i64,
+    total: i64,
+    state: String,
+    #[cfg(target_os = "windows")]
+    operation: Option<ICoreWebView2DownloadOperation>,
+}
+
 struct AppState {
     window: Rc<Window>,
     context: Option<WebContext>,
@@ -115,6 +141,8 @@ struct AppState {
     storage: Option<Sender<StorageCommand>>,
     dropdown_open: bool,
     dropdown_height: u32,
+    downloads: Vec<DownloadEntry>,
+    next_download_id: u64,
 }
 
 impl AppState {
@@ -143,6 +171,8 @@ impl AppState {
             storage: None,
             dropdown_open: false,
             dropdown_height: 360,
+            downloads: Vec::new(),
+            next_download_id: 1,
         }
     }
 
@@ -233,6 +263,8 @@ fn internal_page(url: &str) -> Option<&'static str> {
         Some("settings")
     } else if url.contains("about") {
         Some("about")
+    } else if url.contains("downloads") {
+        Some("downloads")
     } else {
         None
     }
@@ -244,6 +276,7 @@ fn internal_title(page: &str) -> &'static str {
         "bookmarks" => "Закладки",
         "settings" => "Настройки",
         "about" => "О Rustle",
+        "downloads" => "Загрузки",
         _ => "Rustle",
     }
 }
@@ -462,6 +495,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                 "theme": state.settings.theme,
                 "startup": state.settings.startup,
             },
+            "downloads": downloads_payload(&state),
         });
 
         let window_title = if title == "Новая вкладка" || title == "Rustle" {
@@ -832,6 +866,7 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
         let state_ref = state.borrow();
         if let Some(webview) = state_ref.tab(tab_id).and_then(|tab| tab.webview.as_ref()) {
             install_tab_navigation_handlers(state, webview, tab_id, proxy);
+            install_download_handler(state, webview, tab_id);
             install_accelerators_for_view(state, webview);
         }
     }
@@ -1520,6 +1555,230 @@ fn install_accelerators_for_view(state: &Rc<RefCell<AppState>>, webview: &WebVie
 #[cfg(not(target_os = "windows"))]
 fn install_accelerators_for_view(_state: &Rc<RefCell<AppState>>, _webview: &WebView) {}
 
+#[cfg(target_os = "windows")]
+fn downloads_dir() -> PathBuf {
+    let dir = std::env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("Downloads");
+    let _ = fs::create_dir_all(&dir);
+    dir
+}
+
+fn unique_download_path(url: &str) -> PathBuf {
+    let name = Url::parse(url)
+        .ok()
+        .and_then(|parsed| {
+            parsed
+                .path_segments()
+                .and_then(|mut segments| segments.next_back())
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "download".to_owned());
+    let name = name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let dir = downloads_dir();
+    let mut candidate = dir.join(&name);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let path = Path::new(&name);
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("download");
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    for index in 1..1000 {
+        let suffix = if ext.is_empty() {
+            format!("{stem} ({index})")
+        } else {
+            format!("{stem} ({index}).{ext}")
+        };
+        candidate = dir.join(suffix);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    dir.join(name)
+}
+
+fn downloads_payload(state: &AppState) -> Value {
+    let items: Vec<Value> = state
+        .downloads
+        .iter()
+        .map(|download| {
+            json!({
+                "id": download.id,
+                "url": download.url,
+                "path": download.path,
+                "received": download.received,
+                "total": download.total,
+                "state": download.state,
+            })
+        })
+        .collect();
+    Value::Array(items)
+}
+
+#[cfg(target_os = "windows")]
+fn update_download(
+    state: &Rc<RefCell<AppState>>,
+    id: u64,
+    received: i64,
+    total: i64,
+    status: &str,
+) {
+    if let Some(download) = state
+        .borrow_mut()
+        .downloads
+        .iter_mut()
+        .find(|download| download.id == id)
+    {
+        download.received = received;
+        if total > 0 {
+            download.total = total;
+        }
+        download.state = status.to_owned();
+    }
+    let _ = state.borrow().proxy.send_event(AppEvent::DownloadsChanged);
+}
+
+#[cfg(target_os = "windows")]
+fn download_state_name(operation: &ICoreWebView2DownloadOperation) -> &'static str {
+    let mut value = COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS;
+    unsafe {
+        let _ = operation.State(&mut value);
+    }
+    if value == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED {
+        "completed"
+    } else if value == COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED {
+        "interrupted"
+    } else {
+        "progress"
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn install_download_operation_handlers(
+    state: &Rc<RefCell<AppState>>,
+    operation: &ICoreWebView2DownloadOperation,
+    id: u64,
+) {
+    let progress_state = Rc::clone(state);
+    let mut progress_token = 0;
+    let progress = BytesReceivedChangedEventHandler::create(Box::new(move |operation, _| {
+        if let Some(operation) = operation {
+            let mut received = 0;
+            let mut total = 0;
+            unsafe {
+                let _ = operation.BytesReceived(&mut received);
+                let _ = operation.TotalBytesToReceive(&mut total);
+            }
+            update_download(
+                &progress_state,
+                id,
+                received,
+                total,
+                download_state_name(&operation),
+            );
+        }
+        Ok(())
+    }));
+    unsafe {
+        let _ = operation.add_BytesReceivedChanged(&progress, &mut progress_token);
+    }
+
+    let state_changed = Rc::clone(state);
+    let mut state_token = 0;
+    let changed = StateChangedEventHandler::create(Box::new(move |operation, _| {
+        if let Some(operation) = operation {
+            let mut received = 0;
+            let mut total = 0;
+            unsafe {
+                let _ = operation.BytesReceived(&mut received);
+                let _ = operation.TotalBytesToReceive(&mut total);
+            }
+            update_download(
+                &state_changed,
+                id,
+                received,
+                total,
+                download_state_name(&operation),
+            );
+        }
+        Ok(())
+    }));
+    unsafe {
+        let _ = operation.add_StateChanged(&changed, &mut state_token);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn install_download_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, _tab_id: TabId) {
+    let state = Rc::clone(state);
+    let mut token = 0;
+    let handler = DownloadStartingEventHandler::create(Box::new(move |_sender, args| {
+        let Some(args) = args else {
+            return Ok(());
+        };
+        let Ok(operation) = (unsafe { args.DownloadOperation() }) else {
+            return Ok(());
+        };
+        let url = {
+            let mut raw = windows_core::PWSTR::null();
+            unsafe {
+                let _ = operation.Uri(&mut raw);
+            }
+            unsafe { raw.to_string().unwrap_or_default() }
+        };
+        let path = unique_download_path(&url);
+        let wide: Vec<u16> = path
+            .to_string_lossy()
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        unsafe {
+            let _ = args.SetResultFilePath(PCWSTR(wide.as_ptr()));
+            let _ = args.SetHandled(true);
+        }
+        let id = {
+            let mut state = state.borrow_mut();
+            let id = state.next_download_id;
+            state.next_download_id += 1;
+            state.downloads.push(DownloadEntry {
+                id,
+                url: url.clone(),
+                path: path.to_string_lossy().into_owned(),
+                received: 0,
+                total: 0,
+                state: "progress".to_owned(),
+                operation: Some(operation.clone()),
+            });
+            id
+        };
+        install_download_operation_handlers(&state, &operation, id);
+        let _ = state.borrow().proxy.send_event(AppEvent::DownloadsChanged);
+        Ok(())
+    }));
+    if let Ok(webview4) = webview.webview().cast::<ICoreWebView2_4>() {
+        unsafe {
+            let _ = webview4.add_DownloadStarting(&handler, &mut token);
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn install_download_handler(_state: &Rc<RefCell<AppState>>, _webview: &WebView, _tab_id: TabId) {}
+
 fn storage_query(state: &Rc<RefCell<AppState>>, request_id: u64, query: StorageQuery) {
     if let Some(storage) = &state.borrow().storage {
         let _ = storage.send(StorageCommand::Query { request_id, query });
@@ -1698,6 +1957,59 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             };
             if changed {
                 apply_layout(state);
+            }
+        }
+        Some("downloads.cancel") => {
+            if let Some(id) = message.get("id").and_then(|value| value.as_u64()) {
+                let mut cancelled = false;
+                {
+                    let mut state = state.borrow_mut();
+                    if let Some(download) = state.downloads.iter_mut().find(|d| d.id == id) {
+                        #[cfg(target_os = "windows")]
+                        if let Some(operation) = &download.operation {
+                            unsafe {
+                                let _ = operation.Cancel();
+                            }
+                        }
+                        download.state = "cancelled".to_owned();
+                        cancelled = true;
+                    }
+                }
+                if cancelled {
+                    push_ui_state(state);
+                }
+            }
+        }
+        Some("downloads.open") => {
+            if let Some(id) = message.get("id").and_then(|value| value.as_u64()) {
+                let path = state
+                    .borrow()
+                    .downloads
+                    .iter()
+                    .find(|download| download.id == id)
+                    .map(|download| download.path.clone());
+                if let Some(path) = path {
+                    if Path::new(&path).exists() {
+                        let _ = ProcessCommand::new("explorer").arg(&path).spawn();
+                    }
+                }
+            }
+        }
+        Some("downloads.reveal") => {
+            if let Some(id) = message.get("id").and_then(|value| value.as_u64()) {
+                let path = state
+                    .borrow()
+                    .downloads
+                    .iter()
+                    .find(|download| download.id == id)
+                    .map(|download| download.path.clone());
+                if let Some(path) = path {
+                    if Path::new(&path).exists() {
+                        let _ = ProcessCommand::new("explorer")
+                            .arg(format!("/select,{path}"))
+                            .spawn();
+                    }
+                }
             }
         }
         Some("settings.save") => {
@@ -1905,6 +2217,9 @@ fn main() -> wry::Result<()> {
                 if let Some(chrome) = &state_ref.chrome {
                     let _ = chrome.evaluate_script(&script);
                 }
+            }
+            Event::UserEvent(AppEvent::DownloadsChanged) => {
+                push_ui_state(&state);
             }
             Event::UserEvent(AppEvent::Exit) => {
                 save_session_state(&state, true);
