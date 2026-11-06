@@ -178,6 +178,8 @@ Scoop прописывает PATH и `CARGO_HOME`/`RUSTUP_HOME` в пользо�
 | Память, 2 вкладки (private / WorkingSet) | 208.2 / 417.3 МБ, 9 процессов |
 | Бинарь release | 1.16 МБ |
 | Восстановление сессии | после kill и после graceful exit |
+| Стресс 10 вкладок | private 508 МБ, WorkingSet 996 МБ, 19 процессов |
+| Стресс 20 вкладок | не пройден: 19 синтетических Ctrl+T с шагом 600 мс создали 10 вкладок — WebView2 блокирует UI при создании |
 | Ручные сценарии | Ctrl+T/W/Shift+T/Tab, switch, close, plus, target=_blank, ошибка в одной из вкладок, session restore |
 
 ---
