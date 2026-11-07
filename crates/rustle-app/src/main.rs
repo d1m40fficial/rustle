@@ -99,6 +99,7 @@ enum AppEvent {
     LoadTimeout(TabId),
     ContentIpc(TabId, String),
     RefreshFavicon(TabId),
+    FetchFavicons,
     FaviconFetched(TabId, String, Vec<u8>),
     Vertical(bool),
     LayoutTick,
@@ -913,6 +914,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
         if !still_vertical {
             let sidebar = state.borrow_mut().sidebar.take();
             drop(sidebar);
+            focus_active_content(state);
         }
     }
 }
@@ -2265,6 +2267,60 @@ fn image_mime(bytes: &[u8]) -> &'static str {
     }
 }
 
+fn attribute_value(tag: &str, name: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    let position = lower.find(name)?;
+    let after = &tag[position + name.len()..];
+    let equal = after.find('=')?;
+    let rest = after[equal + 1..].trim_start();
+    let quote = rest.chars().next()?;
+    if quote == '"' || quote == '\'' {
+        let value = &rest[1..];
+        let end = value.find(quote)?;
+        Some(value[..end].replace("&amp;", "&"))
+    } else {
+        Some(rest.split_whitespace().next()?.to_owned())
+    }
+}
+
+fn icon_href_from_html(html: &str) -> Option<String> {
+    let lower = html.to_ascii_lowercase();
+    let mut offset = 0;
+    while let Some(found) = lower[offset..].find("<link") {
+        let start = offset + found;
+        let rest = &lower[start..];
+        let Some(end) = rest.find('>') else {
+            break;
+        };
+        let tag = &html[start..start + end];
+        let low_tag = &lower[start..start + end];
+        if (low_tag.contains("icon") || low_tag.contains("apple-touch")) && low_tag.contains("href")
+        {
+            if let Some(href) = attribute_value(tag, "href") {
+                if !href.is_empty() {
+                    return Some(href);
+                }
+            }
+        }
+        offset = start + end + 1;
+    }
+    None
+}
+
+fn download_image(url: &str) -> Option<Vec<u8>> {
+    let response = ureq::get(url).timeout(Duration::from_secs(7)).call().ok()?;
+    if response.status() != 200 {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    response
+        .into_reader()
+        .take(512 * 1024)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (image_mime(&bytes) != "application/octet-stream").then_some(bytes)
+}
+
 fn fetch_site_favicon(state: &Rc<RefCell<AppState>>, tab_id: TabId, page_url: &str) {
     let proxy = state.borrow().proxy.clone();
     let private = state.borrow().private;
@@ -2285,28 +2341,27 @@ fn fetch_site_favicon(state: &Rc<RefCell<AppState>>, tab_id: TabId, page_url: &s
     let name = favicon_name(page_url);
     let page_owned = page_url.to_owned();
     std::thread::spawn(move || {
-        let request = ureq::get(&icon_url).timeout(Duration::from_secs(7)).call();
-        let Ok(response) = request else {
-            return;
-        };
-        if response.status() != 200 {
-            return;
+        let bytes = download_image(&icon_url).or_else(|| {
+            let response = ureq::get(&page_owned)
+                .timeout(Duration::from_secs(7))
+                .call()
+                .ok()?;
+            if response.status() != 200 {
+                return None;
+            }
+            let mut html = String::new();
+            response
+                .into_reader()
+                .take(512 * 1024)
+                .read_to_string(&mut html)
+                .ok()?;
+            let href = icon_href_from_html(&html)?;
+            let icon = Url::parse(&page_owned).ok()?.join(&href).ok()?;
+            download_image(icon.as_str())
+        });
+        if let Some(bytes) = bytes {
+            let _ = proxy.send_event(AppEvent::FaviconFetched(tab_id, name, bytes));
         }
-        let mut bytes = Vec::new();
-        if response
-            .into_reader()
-            .take(512 * 1024)
-            .read_to_end(&mut bytes)
-            .is_err()
-        {
-            return;
-        }
-        let mime = image_mime(&bytes);
-        if mime == "application/octet-stream" {
-            return;
-        }
-        let _ = page_owned;
-        let _ = proxy.send_event(AppEvent::FaviconFetched(tab_id, name, bytes));
     });
 }
 
@@ -3567,6 +3622,7 @@ fn main() -> wry::Result<()> {
         state.private = private;
         state.vertical = settings.vertical_tabs;
         state.sidebar_collapsed = settings.sidebar_collapsed;
+
         state.bookmarks = startup_bookmarks;
         state.storage = if private {
             None
@@ -3605,6 +3661,13 @@ fn main() -> wry::Result<()> {
     for url in startup_urls {
         let _ = proxy.send_event(AppEvent::OpenUrl(url));
     }
+    {
+        let proxy = proxy.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(2));
+            let _ = proxy.send_event(AppEvent::FetchFavicons);
+        });
+    }
 
     let private_cleanup = private_root.clone();
 
@@ -3642,6 +3705,18 @@ fn main() -> wry::Result<()> {
             }
             Event::UserEvent(AppEvent::RefreshFavicon(tab_id)) => {
                 request_tab_favicon(&state, tab_id);
+            }
+            Event::UserEvent(AppEvent::FetchFavicons) => {
+                let tabs: Vec<(TabId, String)> = state
+                    .borrow()
+                    .tabs
+                    .iter()
+                    .filter(|tab| tab.url.starts_with("http"))
+                    .map(|tab| (tab.id, tab.url.clone()))
+                    .collect();
+                for (tab_id, url) in tabs {
+                    fetch_site_favicon(&state, tab_id, &url);
+                }
             }
             Event::UserEvent(AppEvent::FaviconFetched(tab_id, name, bytes)) => {
                 let path = favicon_cache_path(&name);
@@ -3689,6 +3764,7 @@ fn main() -> wry::Result<()> {
                 }
             }
             Event::UserEvent(AppEvent::Vertical(enabled)) => {
+                state.borrow_mut().layout_anim = None;
                 let (from_top, from_side) = {
                     let state_ref = state.borrow();
                     let top = if state_ref.vertical {
@@ -3733,6 +3809,9 @@ fn main() -> wry::Result<()> {
                 }
                 apply_layout(&state);
                 push_ui_state(&state);
+                if !enabled {
+                    focus_active_content(&state);
+                }
             }
             Event::UserEvent(AppEvent::Focus) => {
                 state.borrow().window.set_visible(true);

@@ -1,7 +1,7 @@
 :root {
-  --paper: #0c0c0c;
-  --panel: #111110;
-  --rail: #090909;
+  --paper: #1f1f1f;
+  --panel: #1f1f1f;
+  --rail: #1a1a1a;
   --ink: #e9e6df;
   --muted: #918d85;
   --faint: #6e6a63;
@@ -297,4 +297,60 @@ body.collapsed .sidebar-new {
   height: 32px;
   padding: 0;
   text-align: center;
+}
+
+.sidebar-new-top {
+  display: flex;
+  flex: 0 0 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin: 8px;
+  padding: 0 12px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.sidebar-new-top:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--paper);
+}
+
+.sidebar-plus {
+  font-family: var(--mono);
+  font-size: 23px;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.sidebar-new-label {
+  color: currentColor;
+  font-family: var(--mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.sidebar-foot {
+  justify-content: center;
+}
+
+body.collapsed .sidebar-new-top {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  margin: 6px auto;
+  padding: 0;
+}
+
+body.collapsed .sidebar-new-label {
+  display: none;
+}
+
+body.collapsed .sidebar-plus {
+  font-size: 26px;
 }

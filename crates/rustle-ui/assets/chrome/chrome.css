@@ -1,7 +1,7 @@
 :root {
-  --bg: #0c0c0c;
-  --bg-elevated: #111110;
-  --bg-hover: rgba(233, 230, 223, 0.055);
+  --bg: #1f1f1f;
+  --bg-elevated: #252525;
+  --bg-hover: rgba(255, 255, 255, 0.06);
   --border: rgba(233, 230, 223, 0.13);
   --border-strong: rgba(233, 230, 223, 0.24);
   --text: #e9e6df;

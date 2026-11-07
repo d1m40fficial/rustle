@@ -1284,9 +1284,9 @@
         closeMenu();
       });
     }
-    const toolbarNewTab = byId("toolbar-new-tab");
-    if (toolbarNewTab) {
-      toolbarNewTab.addEventListener("click", () => send({ type: "tabs.new" }));
+    const toolbarHome = byId("toolbar-home");
+    if (toolbarHome) {
+      toolbarHome.addEventListener("click", () => send({ type: "nav.go", url: "rustle://newtab" }));
     }
     const tilesEdit = byId("tiles-edit");
     if (tilesEdit) {
