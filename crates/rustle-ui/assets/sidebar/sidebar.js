@@ -173,9 +173,9 @@
         more.textContent = "+" + (tabs.length - 4);
         favs.append(more);
       }
-      head.append(toggle, name, count, favs, actions);
+      head.append(toggle, name, favs, actions);
     } else {
-      head.append(toggle, name, count, actions);
+      head.append(toggle, name, actions);
     }
     section.append(head);
 

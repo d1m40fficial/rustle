@@ -233,6 +233,7 @@ struct AppState {
     next_group_id: u64,
     adblock_engine: Option<adblock::FilterEngine>,
     adblock_info: adblock::AdblockInfo,
+    prompt_open: bool,
 }
 
 struct LayoutAnimation {
@@ -283,6 +284,7 @@ impl AppState {
             next_group_id: 1,
             adblock_engine: None,
             adblock_info: adblock::AdblockInfo::default(),
+            prompt_open: false,
         }
     }
 
@@ -686,8 +688,10 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                 "httpsFirst": state.settings.https_first,
                 "clearOnExit": state.settings.clear_on_exit,
                 "adblock": state.settings.adblock,
+                "adblockExceptions": state.settings.adblock_exceptions,
             },
             "adblockStatus": state.adblock_info.to_json(),
+            "adblockExceptions": state.settings.adblock_exceptions,
             "downloads": downloads_payload(&state),
         });
 
@@ -1200,6 +1204,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
         find_open,
         vertical,
         sidebar_collapsed,
+        prompt_open,
     ) = {
         let state = state.borrow();
         let overlay_mode = state.active_tab().is_some_and(|tab| {
@@ -1215,6 +1220,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             state.find_open,
             state.vertical,
             state.sidebar_collapsed,
+            state.prompt_open,
         )
     };
 
@@ -1249,7 +1255,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             (target_top, target_side, vertical, false)
         }
     };
-    let chrome_height = if overlay_mode {
+    let chrome_height = if overlay_mode || prompt_open {
         height
     } else if dropdown_open {
         (dropdown_height + top.saturating_sub(CHROME_COLLAPSED)).clamp(top, height)
@@ -1266,6 +1272,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             let _ = chrome.set_bounds(rect(0, 0, width, chrome_height));
         }
         if let Some(sidebar) = &state.sidebar {
+            let sidebar_visible = sidebar_visible && !prompt_open;
             let _ = sidebar.set_visible(sidebar_visible);
             if sidebar_visible {
                 let _ = sidebar.set_bounds(rect(0, top, sidebar_width, height.saturating_sub(top)));
@@ -1293,7 +1300,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
     }
 
     raise_chrome(state);
-    if sidebar_visible {
+    if sidebar_visible && !prompt_open {
         raise_sidebar(state);
     }
     if animation_finished {
@@ -3414,6 +3421,9 @@ fn apply_cosmetic_filters(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
         if !(tab.url.starts_with("http://") || tab.url.starts_with("https://")) {
             return;
         }
+        if adblock_exception(&state.settings.adblock_exceptions, &tab.url, &tab.url) {
+            return;
+        }
         let Some(engine) = &state.adblock_engine else {
             return;
         };
@@ -3680,6 +3690,23 @@ fn adblock_request_type(
 }
 
 #[cfg(target_os = "windows")]
+fn adblock_exception(exceptions: &[String], url: &str, source_url: &str) -> bool {
+    let matches = |value: &str| {
+        Url::parse(value)
+            .ok()
+            .and_then(|parsed| parsed.host_str().map(str::to_lowercase))
+            .is_some_and(|host| {
+                exceptions.iter().any(|exception| {
+                    let exception = exception.trim().trim_start_matches('.').to_lowercase();
+                    !exception.is_empty()
+                        && (host == exception || host.ends_with(&format!(".{exception}")))
+                })
+            })
+    };
+    matches(url) || matches(source_url)
+}
+
+#[cfg(target_os = "windows")]
 fn install_adblock_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, tab_id: TabId) {
     use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_WEB_RESOURCE_CONTEXT;
 
@@ -3714,6 +3741,10 @@ fn install_adblock_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, tab
             .tab(tab_id)
             .map(|tab| tab.url.clone())
             .unwrap_or_default();
+        let exceptions = state.borrow().settings.adblock_exceptions.clone();
+        if adblock_exception(&exceptions, &url, &source_url) {
+            return Ok(());
+        }
         let outcome = {
             let state = state.borrow();
             let Some(engine) = &state.adblock_engine else {
@@ -4125,6 +4156,14 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 .unwrap_or(true);
             find_in_page(state, text, forward);
         }
+        Some("ui.prompt") => {
+            let open = message
+                .get("open")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            state.borrow_mut().prompt_open = open;
+            apply_layout(state);
+        }
         Some("ui.menu") => {
             let origin = match message.get("origin").and_then(|value| value.as_str()) {
                 Some("sidebar") => native_menu::Origin::Sidebar,
@@ -4268,6 +4307,17 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             }
             if let Some(value) = message.get("adblock").and_then(|value| value.as_bool()) {
                 settings.adblock = value;
+            }
+            if let Some(values) = message
+                .get("adblockExceptions")
+                .and_then(|value| value.as_array())
+            {
+                settings.adblock_exceptions = values
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .map(|value| value.trim().trim_start_matches('.').to_lowercase())
+                    .filter(|value| !value.is_empty())
+                    .collect();
             }
             if !state.borrow().private {
                 let _ = rustle_storage::save_settings(&settings);

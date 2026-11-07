@@ -69,6 +69,8 @@ pub struct Settings {
     pub vertical_tabs: bool,
     #[serde(default)]
     pub sidebar_collapsed: bool,
+    #[serde(default = "default_adblock_exceptions")]
+    pub adblock_exceptions: Vec<String>,
 }
 
 fn default_search_engine() -> String {
@@ -87,6 +89,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_adblock_exceptions() -> Vec<String> {
+    vec!["hltv.org".to_owned()]
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -99,6 +105,7 @@ impl Default for Settings {
             adblock: true,
             vertical_tabs: false,
             sidebar_collapsed: false,
+            adblock_exceptions: default_adblock_exceptions(),
         }
     }
 }

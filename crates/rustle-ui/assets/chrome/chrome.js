@@ -194,23 +194,14 @@
     name.className = "tab-group__name";
     name.textContent = group.name;
 
-    chip.append(arrow, dot, name);
 
-    if (group.collapsed && children.length) {
-      const favs = document.createElement("span");
-      favs.className = "tab-group__favs";
-      children.slice(0, 5).forEach((tab) => {
-        const favicon = makeTabFavicon(tab);
-        favicon.classList.add("tab-group__favicon");
-        favs.append(favicon);
-      });
-      if (children.length > 5) {
-        const more = document.createElement("span");
-        more.className = "tab-group__more";
-        more.textContent = "+" + (children.length - 5);
-        favs.append(more);
-      }
-      chip.append(favs);
+    if (group.collapsed) {
+      const count = document.createElement("span");
+      count.className = "tab-group__count";
+      count.textContent = String(children.length);
+      chip.append(arrow, dot, name, count);
+    } else {
+      chip.append(arrow, dot, name);
     }
 
     const add = document.createElement("button");
@@ -269,7 +260,11 @@
     if (!group.collapsed) {
       const body = document.createElement("div");
       body.className = "tab-group__tabs";
-      children.forEach((tab) => body.append(makeTabElement(tab, activeId, false)));
+        children.forEach((tab) => {
+          const element = makeTabElement(tab, activeId, false);
+          element.classList.add("tab--compact");
+          body.append(element);
+        });
       section.append(body);
     }
     return section;
@@ -652,21 +647,37 @@
         renderShortcuts();
       });
       tile.append(mark, label, rename);
-      if (!item.bookmark) {
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "shortcut__remove";
-        remove.title = "Удалить плитку";
-        remove.setAttribute("aria-label", "Удалить плитку");
-        remove.textContent = "×";
-        remove.addEventListener("click", (event) => {
-          event.stopPropagation();
-          const next = readShortcuts().filter((entry) => entry.url !== item.url);
-          saveShortcuts(next);
-          renderShortcuts();
-        });
-        tile.append(remove);
+      if (tileEdit) {
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "shortcut__remove";
+  remove.title = "Удалить плитку";
+  remove.setAttribute("aria-label", "Удалить плитку");
+  remove.textContent = "×";
+  remove.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    if (item.bookmark && item.bookmarkId) {
+      try {
+        await request("bookmarks.remove", { entryId: item.bookmarkId });
+        current.bookmarks = (current.bookmarks || []).filter(
+          (entry) => entry.id !== item.bookmarkId,
+        );
+      } catch (error) {
+        console.warn(error);
       }
+    } else {
+      const next = readShortcuts().filter((entry) => entry.url !== item.url);
+      saveShortcuts(next);
+    }
+    const order = readTileOrder().filter((url) => url !== item.url);
+    saveTileOrder(order);
+    const labels = readTileLabels();
+    delete labels[item.url];
+    saveTileLabels(labels);
+    renderShortcuts();
+  });
+  tile.append(remove);
+}
 
       if (tileEdit) {
         tile.draggable = true;
@@ -861,6 +872,10 @@
     const adblock = byId("setting-adblock");
     if (adblock) {
       adblock.checked = settings.adblock !== false;
+    }
+    const exceptions = byId("setting-adblock-exceptions");
+    if (exceptions) {
+      exceptions.value = (settings.adblockExceptions || []).join("\n");
     }
     const status = byId("settings-status");
     if (status) {
@@ -1097,6 +1112,52 @@
 
   window.addEventListener("resize", syncAddressOverlay);
 
+  let promptState = null;
+
+  const closePrompt = () => {
+    const overlay = byId("prompt-overlay");
+    if (overlay) overlay.hidden = true;
+    promptState = null;
+    send({ type: "ui.prompt", open: false });
+  };
+
+  const openPrompt = (kind, payload, title, value) => {
+    promptState = { kind, payload };
+    const overlay = byId("prompt-overlay");
+    const titleNode = byId("prompt-title");
+    const input = byId("prompt-input");
+    if (!overlay || !titleNode || !input) return;
+    titleNode.textContent = title;
+    input.value = value || "";
+    overlay.hidden = false;
+    send({ type: "ui.prompt", open: true });
+    window.setTimeout(() => { input.focus(); input.select(); }, 30);
+  };
+
+  const submitPrompt = () => {
+    const input = byId("prompt-input");
+    const value = input ? input.value.trim() : "";
+    if (!value || !promptState) return;
+    const { kind, payload } = promptState;
+    closePrompt();
+    if (kind === "newgroup") send({ type: "groups.create", name: value, tabId: payload.id });
+    else if (kind === "rename") send({ type: "groups.rename", groupId: payload.groupId, name: value });
+  };
+
+  const promptInput = byId("prompt-input");
+  const promptOk = byId("prompt-ok");
+  const promptCancel = byId("prompt-cancel");
+  const promptOverlay = byId("prompt-overlay");
+  if (promptOk) promptOk.addEventListener("click", submitPrompt);
+  if (promptCancel) promptCancel.addEventListener("click", closePrompt);
+  if (promptOverlay) promptOverlay.addEventListener("mousedown", (event) => {
+    if (event.target === promptOverlay) closePrompt();
+  });
+  if (promptInput) promptInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); submitPrompt(); }
+    else if (event.key === "Escape") { event.preventDefault(); closePrompt(); }
+  });
+
   const handleMenuAction = (action) => {
     if (!action || typeof action !== "string") {
       return;
@@ -1147,14 +1208,7 @@
       } else if (name === "group") {
         send({ type: "tabs.moveGroup", id, groupId: Number(parts[3]) });
       } else if (name === "newgroup") {
-        const groupName = window.prompt("Название группы", "Новая группа");
-        if (groupName === null) {
-          return;
-        }
-        const trimmed = groupName.trim();
-        if (trimmed) {
-          send({ type: "groups.create", name: trimmed, tabId: id });
-        }
+        openPrompt("newgroup", { id }, "Название группы", "Новая группа");
       }
       return;
     }
@@ -1167,14 +1221,7 @@
       } else if (name === "newtab") {
         send({ type: "groups.newTab", groupId });
       } else if (name === "rename") {
-        const next = window.prompt("Название группы", group ? group.name : "Группа");
-        if (next === null) {
-          return;
-        }
-        const trimmed = next.trim();
-        if (trimmed) {
-          send({ type: "groups.rename", groupId, name: trimmed });
-        }
+        openPrompt("rename", { groupId }, "Название группы", group ? group.name : "Группа");
       } else if (name === "remove") {
         if (window.confirm("Удалить группу «" + (group ? group.name : "") + "» и закрыть её вкладки?")) {
           send({ type: "groups.remove", groupId });
