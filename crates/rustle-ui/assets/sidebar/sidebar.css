@@ -1,6 +1,6 @@
 :root {
-  --paper: #1f1f1f;
-  --panel: #1f1f1f;
+  --paper: #2a2a2a;
+  --panel: #242424;
   --rail: #1a1a1a;
   --ink: #e9e6df;
   --muted: #918d85;
@@ -43,6 +43,7 @@ body {
   flex-direction: column;
   overflow: hidden;
   background: var(--panel);
+  border-right: 1px solid var(--line);
   color: var(--ink);
   font: 12px/1.2 var(--sans);
   -webkit-font-smoothing: antialiased;
@@ -534,6 +535,7 @@ body.collapsed .tab-group__head {
 
 body.collapsed .tab-group__name,
 body.collapsed .tab-group__count,
+body.collapsed .tab-group__favs,
 body.collapsed .tab-group__actions {
   display: none;
 }
@@ -547,4 +549,88 @@ body.collapsed .tab-group__tabs {
 body.collapsed .tab-group__toggle {
   width: 28px;
   height: 28px;
+}
+.sidebar-pinned {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px 4px;
+  border-bottom: 1px solid var(--line);
+  background: var(--rail);
+}
+
+.sidebar-pinned[hidden] {
+  display: none;
+}
+
+.sidebar-tab--pinned {
+  min-height: 38px;
+  background: var(--active);
+  border-left-color: var(--accent);
+}
+
+.sidebar-tab--pinned .sidebar-tab__host {
+  display: none;
+}
+
+.tab-group__favs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tab-group__favicon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  font-size: 8px;
+}
+
+.tab-group__favicon img {
+  width: 14px;
+  height: 14px;
+}
+
+.tab-group__more {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 0.42rem;
+}
+
+
+.tab-group__favicons {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.tab-group__favicons .sidebar-tab__favicon {
+  width: 14px;
+  height: 14px;
+  flex-basis: 14px;
+  font-size: 7px;
+}
+
+.tab-group__favicons .sidebar-tab__favicon img {
+  width: 14px;
+  height: 14px;
+}
+
+.tab-group__more {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 0.45rem;
+}
+
+.tab-group__actions {
+  margin-left: 4px;
+}
+
+body.collapsed .tab-group__favicons {
+  display: none;
 }

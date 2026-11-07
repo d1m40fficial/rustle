@@ -17,6 +17,7 @@ license = "MIT"
 repository = "https://github.com/d1m40fficial/rustle"
 
 [workspace.dependencies]
+adblock = { version = "0.13", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
 include_dir = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

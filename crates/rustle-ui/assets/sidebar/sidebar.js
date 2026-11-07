@@ -40,73 +40,47 @@
     }
   };
 
-  const closeContextMenu = () => {
-    byId("tab-context")?.remove();
-  };
-
-  const openContextMenu = (event, tab) => {
+  const openMenu = (event, kind, extra = {}) => {
     event.preventDefault();
     event.stopPropagation();
-    closeContextMenu();
-    const menu = document.createElement("div");
-    menu.className = "tab-context";
-    menu.id = "tab-context";
-
-    const addItem = (label, action, className = "") => {
-      const item = document.createElement("button");
-      item.type = "button";
-      item.className = className;
-      item.textContent = label;
-      item.addEventListener("click", () => {
-        closeContextMenu();
-        action();
-      });
-      menu.append(item);
-    };
-
-    addItem("Новая группа…", () => {
-      const name = window.prompt("Название группы", "Новая группа");
-      if (name === null) return;
-      send({ type: "groups.create", name: name.trim() || "Новая группа", tabId: tab.id });
+    send({
+      type: "ui.menu",
+      kind,
+      origin: "sidebar",
+      x: event.clientX,
+      y: event.clientY,
+      ...extra,
     });
-
-    (current.groups || []).forEach((group) => {
-      if (group.id === tab.groupId) return;
-      addItem("В группу «" + group.name + "»", () => {
-        send({ type: "tabs.moveGroup", id: tab.id, groupId: group.id });
-      });
-    });
-
-    if (tab.groupId) {
-      addItem("Убрать из группы", () => {
-        send({ type: "tabs.moveGroup", id: tab.id, groupId: null });
-      });
-    }
-
-    document.body.append(menu);
-    const rect = menu.getBoundingClientRect();
-    const left = Math.min(event.clientX, window.innerWidth - rect.width - 8);
-    const top = Math.min(event.clientY, window.innerHeight - rect.height - 8);
-    menu.style.left = Math.max(6, left) + "px";
-    menu.style.top = Math.max(6, top) + "px";
   };
 
-  const makeRow = (tab) => {
-    const row = document.createElement("div");
-    row.className = "sidebar-tab" + (tab.id === current.activeId ? " sidebar-tab--active" : "");
-    row.dataset.id = String(tab.id);
-    row.title = tab.title || tab.url;
-
+  const makeFavicon = (tab) => {
     const favicon = document.createElement("span");
     favicon.className = "sidebar-tab__favicon";
     if (tab.favicon) {
       const image = document.createElement("img");
       image.src = tab.faviconData || "rustle://localhost/favicon/" + tab.favicon;
       image.alt = "";
+      image.addEventListener("error", () => {
+        favicon.replaceChildren();
+        favicon.textContent = initial(tab);
+      });
       favicon.append(image);
     } else {
       favicon.textContent = initial(tab);
     }
+    return favicon;
+  };
+
+  const makeRow = (tab) => {
+    const row = document.createElement("div");
+    row.className =
+      "sidebar-tab" +
+      (tab.pinned ? " sidebar-tab--pinned" : "") +
+      (tab.id === current.activeId ? " sidebar-tab--active" : "");
+    row.dataset.id = String(tab.id);
+    row.title = tab.title || tab.url;
+
+    const favicon = makeFavicon(tab);
 
     const copy = document.createElement("span");
     copy.className = "sidebar-tab__copy";
@@ -136,7 +110,7 @@
         send({ type: "tabs.close", id: tab.id });
       }
     });
-    row.addEventListener("contextmenu", (event) => openContextMenu(event, tab));
+    row.addEventListener("contextmenu", (event) => openMenu(event, "tab", { id: tab.id }));
     return row;
   };
 
@@ -158,9 +132,10 @@
     name.textContent = group.name;
     name.title = group.name;
 
-    const count = document.createElement("span");
-    count.className = "tab-group__count";
-    count.textContent = String(tabs.length);
+    head.dataset.groupId = String(group.id);
+    head.addEventListener("contextmenu", (event) =>
+      openMenu(event, "group", { groupId: group.id }),
+    );
 
     const actions = document.createElement("span");
     actions.className = "tab-group__actions";
@@ -184,7 +159,24 @@
     });
     actions.append(add, remove);
 
-    head.append(toggle, name, count, actions);
+    if (group.collapsed && tabs.length) {
+      const favs = document.createElement("span");
+      favs.className = "tab-group__favs";
+      tabs.slice(0, 4).forEach((tab) => {
+        const favicon = makeFavicon(tab);
+        favicon.classList.add("tab-group__favicon");
+        favs.append(favicon);
+      });
+      if (tabs.length > 4) {
+        const more = document.createElement("span");
+        more.className = "tab-group__more";
+        more.textContent = "+" + (tabs.length - 4);
+        favs.append(more);
+      }
+      head.append(toggle, name, count, favs, actions);
+    } else {
+      head.append(toggle, name, count, actions);
+    }
     section.append(head);
 
     if (!group.collapsed) {
@@ -213,13 +205,23 @@
     container.replaceChildren();
     const groups = current.groups || [];
     const tabs = current.tabs || [];
+    const pinned = tabs.filter((tab) => tab.pinned);
+    const unpinned = tabs.filter((tab) => !tab.pinned);
+
+    const pinnedContainer = byId("pinned");
+    if (pinnedContainer) {
+      pinnedContainer.replaceChildren();
+      pinned.forEach((tab) => pinnedContainer.append(makeRow(tab)));
+      pinnedContainer.hidden = pinned.length === 0;
+    }
+
     const grouped = new Set();
     groups.forEach((group) => {
-      const children = tabs.filter((tab) => tab.groupId === group.id);
+      const children = unpinned.filter((tab) => tab.groupId === group.id);
       children.forEach((tab) => grouped.add(tab.id));
       container.append(makeGroup(group, children));
     });
-    tabs
+    unpinned
       .filter((tab) => !grouped.has(tab.id))
       .forEach((tab) => container.append(makeRow(tab)));
   };
@@ -234,15 +236,5 @@
 
   byId("collapse").addEventListener("click", () => send({ type: "sidebar.collapse" }));
   byId("new-tab").addEventListener("click", () => send({ type: "tabs.new" }));
-  document.addEventListener("click", (event) => {
-    if (!event.target.closest("#tab-context")) {
-      closeContextMenu();
-    }
-  });
-  document.addEventListener("contextmenu", (event) => {
-    if (!event.target.closest(".sidebar-tab")) {
-      closeContextMenu();
-    }
-  });
   send({ type: "sidebar.ready" });
 })();

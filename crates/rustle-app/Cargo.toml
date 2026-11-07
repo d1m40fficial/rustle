@@ -11,8 +11,10 @@ name = "rustle"
 path = "src/main.rs"
 
 [dependencies]
+adblock.workspace = true
 rfd = "0.15"
 rustle-core.workspace = true
+serde.workspace = true
 rustle-storage.workspace = true
 rustle-ui.workspace = true
 serde_json.workspace = true

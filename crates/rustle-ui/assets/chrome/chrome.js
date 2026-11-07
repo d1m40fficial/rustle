@@ -20,6 +20,8 @@
     mode: "newtab",
     internalPage: "",
     theme: "dark",
+    groups: [],
+    adblockStatus: null,
     settings: { searchEngine: "ddg", theme: "system", startup: "restore" },
   };
 
@@ -148,57 +150,163 @@
     }
   };
 
+  const makeTabFavicon = (tab) => {
+    const favicon = document.createElement("span");
+    favicon.className = "tab__favicon";
+    if (tab.favicon) {
+      favicon.classList.add("tab__favicon--image");
+      const image = document.createElement("img");
+      image.src = tab.faviconData || "rustle://localhost/favicon/" + tab.favicon;
+      image.alt = "";
+      image.addEventListener("error", () => {
+        favicon.classList.remove("tab__favicon--image");
+        favicon.replaceChildren();
+        favicon.textContent = initialFor(tab);
+      });
+      favicon.append(image);
+    } else {
+      favicon.textContent = initialFor(tab);
+    }
+    return favicon;
+  };
+
+  const groupHue = (id) => (Number(id) * 53) % 360;
+
+  const makeGroupChip = (group, children) => {
+    const chip = document.createElement("div");
+    chip.className = "tab-group__chip";
+    chip.dataset.groupToggle = String(group.id);
+    chip.dataset.groupId = String(group.id);
+    chip.tabIndex = 0;
+    chip.setAttribute("role", "button");
+    chip.setAttribute("aria-expanded", String(!group.collapsed));
+    chip.title = group.name;
+    chip.style.setProperty("--group-hue", groupHue(group.id));
+
+    const arrow = document.createElement("span");
+    arrow.className = "tab-group__arrow";
+    arrow.textContent = group.collapsed ? "›" : "⌄";
+
+    const dot = document.createElement("span");
+    dot.className = "tab-group__dot";
+
+    const name = document.createElement("span");
+    name.className = "tab-group__name";
+    name.textContent = group.name;
+
+    chip.append(arrow, dot, name);
+
+    if (group.collapsed && children.length) {
+      const favs = document.createElement("span");
+      favs.className = "tab-group__favs";
+      children.slice(0, 5).forEach((tab) => {
+        const favicon = makeTabFavicon(tab);
+        favicon.classList.add("tab-group__favicon");
+        favs.append(favicon);
+      });
+      if (children.length > 5) {
+        const more = document.createElement("span");
+        more.className = "tab-group__more";
+        more.textContent = "+" + (children.length - 5);
+        favs.append(more);
+      }
+      chip.append(favs);
+    }
+
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "tab-group__add";
+    add.dataset.groupNew = String(group.id);
+    add.title = "Новая вкладка в группе";
+    add.setAttribute("aria-label", "Новая вкладка в группе");
+    add.textContent = "+";
+    chip.append(add);
+    return chip;
+  };
+
+  const makeTabElement = (tab, activeId, pinned) => {
+    const element = document.createElement("div");
+    element.className =
+      "tab" +
+      (pinned ? " tab--pinned" : "") +
+      (tab.id === activeId ? " tab--active" : "") +
+      (tab.loading ? " tab--loading" : "");
+    element.dataset.id = String(tab.id);
+    element.setAttribute("role", "tab");
+    element.setAttribute("aria-selected", String(tab.id === activeId));
+    element.tabIndex = tab.id === activeId ? 0 : -1;
+    element.title = tab.title || "Вкладка";
+
+    const favicon = makeTabFavicon(tab);
+
+    const spinner = document.createElement("span");
+    spinner.className = "tab__spinner";
+    spinner.setAttribute("aria-hidden", "true");
+
+    const title = document.createElement("span");
+    title.className = "tab__title";
+    title.textContent = tab.title || "Вкладка";
+
+    const close = document.createElement("button");
+    close.className = "tab__close";
+    close.type = "button";
+    close.dataset.close = String(tab.id);
+    close.title = "Закрыть вкладку";
+    close.setAttribute("aria-label", "Закрыть вкладку");
+    close.textContent = "×";
+
+    element.append(favicon, spinner, title, close);
+    return element;
+  };
+
+  const makeGroupElement = (group, children, activeId) => {
+    const section = document.createElement("div");
+    section.className =
+      "tab-group tab-group--horizontal" + (group.collapsed ? " tab-group--collapsed" : "");
+    section.dataset.groupId = String(group.id);
+    section.style.setProperty("--group-hue", groupHue(group.id));
+    section.append(makeGroupChip(group, children));
+    if (!group.collapsed) {
+      const body = document.createElement("div");
+      body.className = "tab-group__tabs";
+      children.forEach((tab) => body.append(makeTabElement(tab, activeId, false)));
+      section.append(body);
+    }
+    return section;
+  };
+
   const renderTabs = (tabs, activeId) => {
     const container = byId("tabs");
     container.replaceChildren();
 
-    tabs.forEach((tab) => {
-      const element = document.createElement("div");
-      element.className =
-        "tab" +
-        (tab.id === activeId ? " tab--active" : "") +
-        (tab.loading ? " tab--loading" : "");
-      element.dataset.id = String(tab.id);
-      element.setAttribute("role", "tab");
-      element.setAttribute("aria-selected", String(tab.id === activeId));
-      element.tabIndex = tab.id === activeId ? 0 : -1;
-      element.title = tab.title || "Вкладка";
+    const pinned = tabs.filter((tab) => tab.pinned);
+    const rest = tabs.filter((tab) => !tab.pinned);
+    pinned.forEach((tab) => container.append(makeTabElement(tab, activeId, true)));
+    if (pinned.length) {
+      const divider = document.createElement("span");
+      divider.className = "tabs__divider";
+      container.append(divider);
+    }
 
-      const favicon = document.createElement("span");
-      favicon.className = "tab__favicon";
-      if (tab.favicon) {
-        favicon.classList.add("tab__favicon--image");
-        const image = document.createElement("img");
-        image.src = tab.faviconData || "rustle://localhost/favicon/" + tab.favicon;
-        image.alt = "";
-        image.addEventListener("error", () => {
-          favicon.classList.remove("tab__favicon--image");
-          favicon.replaceChildren();
-          favicon.textContent = initialFor(tab);
-        });
-        favicon.append(image);
-      } else {
-        favicon.textContent = initialFor(tab);
+    const groups = current.groups || [];
+    const renderedGroups = new Set();
+    rest.forEach((tab) => {
+      const groupId = tab.groupId;
+      if (groupId === null || groupId === undefined) {
+        container.append(makeTabElement(tab, activeId, false));
+        return;
       }
-
-      const spinner = document.createElement("span");
-      spinner.className = "tab__spinner";
-      spinner.setAttribute("aria-hidden", "true");
-
-      const title = document.createElement("span");
-      title.className = "tab__title";
-      title.textContent = tab.title || "Вкладка";
-
-      const close = document.createElement("button");
-      close.className = "tab__close";
-      close.type = "button";
-      close.dataset.close = String(tab.id);
-      close.title = "Закрыть вкладку";
-      close.setAttribute("aria-label", "Закрыть вкладку");
-      close.textContent = "×";
-
-      element.append(favicon, spinner, title, close);
-      container.append(element);
+      if (renderedGroups.has(groupId)) {
+        return;
+      }
+      const group = groups.find((entry) => entry.id === groupId);
+      if (!group) {
+        container.append(makeTabElement(tab, activeId, false));
+        return;
+      }
+      renderedGroups.add(groupId);
+      const children = rest.filter((entry) => entry.groupId === groupId);
+      container.append(makeGroupElement(group, children, activeId));
     });
 
     const active = container.querySelector(".tab--active");
@@ -347,6 +455,9 @@
   const tileOrderKey = "rustle.tiles.order.v1";
   const tileLabelsKey = "rustle.tiles.labels.v1";
   let tileEdit = false;
+  const tileFavicons = new Map();
+  const tileFaviconRequested = new Set();
+  let tileFaviconPending = false;
 
   const readShortcuts = () => {
     try {
@@ -411,6 +522,38 @@
     }
   };
 
+  const requestTileFavicons = (items) => {
+    if (tileFaviconPending) {
+      return;
+    }
+    const urls = [];
+    items.forEach((item) => {
+      const url = item.url || "";
+      if (!/^https?:\/\//i.test(url)) {
+        return;
+      }
+      if (tileFavicons.has(url) || tileFaviconRequested.has(url)) {
+        return;
+      }
+      tileFaviconRequested.add(url);
+      urls.push(url);
+    });
+    if (!urls.length) {
+      return;
+    }
+    tileFaviconPending = true;
+    request("favicon.query", { urls: urls.slice(0, 96) })
+      .then((data) => {
+        const found = (data && data.items) || {};
+        Object.keys(found).forEach((url) => tileFavicons.set(url, found[url]));
+      })
+      .catch((error) => console.warn(error))
+      .finally(() => {
+        tileFaviconPending = false;
+        renderShortcuts();
+      });
+  };
+
   const renderShortcuts = () => {
     const container = byId("newtab-shortcuts");
     if (!container) {
@@ -469,7 +612,21 @@
       tile.title = tileEdit ? "Перетащите плитку или нажмите карандаш" : item.title;
       const mark = document.createElement("span");
       mark.className = "newtab__mark";
-      mark.textContent = item.title.slice(0, 2).toUpperCase();
+      const faviconData = tileFavicons.get(item.url);
+      if (faviconData) {
+        mark.classList.add("newtab__mark--image");
+        const image = document.createElement("img");
+        image.src = faviconData;
+        image.alt = "";
+        image.addEventListener("error", () => {
+          mark.classList.remove("newtab__mark--image");
+          mark.replaceChildren();
+          mark.textContent = item.title.slice(0, 2).toUpperCase();
+        });
+        mark.append(image);
+      } else {
+        mark.textContent = item.title.slice(0, 2).toUpperCase();
+      }
       const label = document.createElement("span");
       label.className = "shortcut__label";
       label.textContent = item.title;
@@ -565,6 +722,7 @@
       });
       container.append(tile);
     });
+    requestTileFavicons(items);
   };
 
   const formatBytes = (bytes) => {
@@ -653,6 +811,31 @@
     });
   };
 
+  const adblockStatusText = () => {
+    const info = current.adblockStatus || {};
+    if (info.loading) {
+      return info.message || "Обновление фильтров…";
+    }
+    if (info.ready) {
+      const lists = Array.isArray(info.lists) && info.lists.length ? " · " + info.lists.join(", ") : "";
+      const updated = info.updatedAt ? " · " + formatTime(info.updatedAt) : "";
+      return (info.message || "Фильтры готовы") + lists + updated;
+    }
+    return info.message || "Движок ещё не готов";
+  };
+
+  const updateAdblockStatus = () => {
+    const status = byId("adblock-status");
+    if (status) {
+      status.textContent = adblockStatusText();
+    }
+    const button = byId("adblock-update");
+    if (button) {
+      button.disabled = Boolean(current.adblockStatus && current.adblockStatus.loading);
+      button.textContent = current.adblockStatus && current.adblockStatus.loading ? "Обновление…" : "Обновить";
+    }
+  };
+
   const populateSettings = () => {
     const settings = current.settings || {};
     const engine = byId("setting-engine");
@@ -683,6 +866,7 @@
     if (status) {
       status.textContent = "";
     }
+    updateAdblockStatus();
   };
 
   const closeFind = () => {
@@ -825,9 +1009,16 @@
       renderAddress(true);
     }
     const zoom = Number(payload.zoom);
-    const zoomLabel = byId("zoom-label");
-    if (zoomLabel && Number.isFinite(zoom)) {
-      zoomLabel.textContent = Math.round(zoom * 100) + "%";
+    if (Number.isFinite(zoom)) {
+      document.documentElement.style.setProperty("--page-zoom", String(zoom));
+      const zoomLabel = byId("zoom-label");
+      if (zoomLabel) {
+        zoomLabel.textContent = Math.round(zoom * 100) + "%";
+      }
+      if (lastZoomPercent !== null && zoom !== lastZoomPercent) {
+        showZoomIndicator();
+      }
+      lastZoomPercent = zoom;
     }
 
     const secure = Boolean(payload.secure);
@@ -840,7 +1031,7 @@
     byId("back").disabled = !payload.canGoBack;
     byId("forward").disabled = !payload.canGoForward;
 
-    const loading = Boolean(payload.loading);
+    const loading = Boolean(payload.loading) && (payload.mode || "web") === "web";
     document.documentElement.classList.toggle("loading", loading);
 
     const mode = payload.mode || "web";
@@ -864,6 +1055,10 @@
     if (Array.isArray(payload.bookmarks)) {
       current.bookmarks = payload.bookmarks;
       renderShortcuts();
+    }
+    if (payload.adblockStatus) {
+      current.adblockStatus = payload.adblockStatus;
+      updateAdblockStatus();
     }
 
     if (internal) {
@@ -902,6 +1097,92 @@
 
   window.addEventListener("resize", syncAddressOverlay);
 
+  const handleMenuAction = (action) => {
+    if (!action || typeof action !== "string") {
+      return;
+    }
+    const parts = action.split(/[.:]/);
+    const kind = parts[0];
+    const name = parts[1];
+    const id = Number(parts[2] ?? parts[1]);
+
+    if (kind === "app") {
+      const pages = {
+        history: "rustle://history",
+        bookmarks: "rustle://bookmarks",
+        downloads: "rustle://downloads",
+        settings: "rustle://settings",
+      };
+      if (pages[name]) {
+        send({ type: "nav.go", url: pages[name] });
+      } else if (name === "newtab") {
+        send({ type: "tabs.new" });
+      } else if (name === "reopen") {
+        send({ type: "tabs.reopen" });
+      } else if (name === "vertical") {
+        send({ type: "ui.vertical", enabled: !current.vertical });
+      } else if (name === "bookmark") {
+        if (!current.url || !/^https?:\/\//.test(current.url)) {
+          return;
+        }
+        request("bookmarks.toggle", {
+          url: current.url,
+          title: current.title || current.url,
+        })
+          .then(() => refreshBookmarkTiles())
+          .catch((error) => console.warn(error));
+      }
+      return;
+    }
+
+    if (kind === "tab") {
+      if (name === "pin") {
+        send({ type: "tabs.pin", id, pinned: true });
+      } else if (name === "unpin") {
+        send({ type: "tabs.pin", id, pinned: false });
+      } else if (name === "close") {
+        send({ type: "tabs.close", id });
+      } else if (name === "ungroup") {
+        send({ type: "tabs.moveGroup", id, groupId: null });
+      } else if (name === "group") {
+        send({ type: "tabs.moveGroup", id, groupId: Number(parts[3]) });
+      } else if (name === "newgroup") {
+        const groupName = window.prompt("Название группы", "Новая группа");
+        if (groupName === null) {
+          return;
+        }
+        const trimmed = groupName.trim();
+        if (trimmed) {
+          send({ type: "groups.create", name: trimmed, tabId: id });
+        }
+      }
+      return;
+    }
+
+    if (kind === "group") {
+      const groupId = Number(parts[2]);
+      const group = (current.groups || []).find((entry) => entry.id === groupId);
+      if (name === "toggle") {
+        send({ type: "groups.toggle", groupId });
+      } else if (name === "newtab") {
+        send({ type: "groups.newTab", groupId });
+      } else if (name === "rename") {
+        const next = window.prompt("Название группы", group ? group.name : "Группа");
+        if (next === null) {
+          return;
+        }
+        const trimmed = next.trim();
+        if (trimmed) {
+          send({ type: "groups.rename", groupId, name: trimmed });
+        }
+      } else if (name === "remove") {
+        if (window.confirm("Удалить группу «" + (group ? group.name : "") + "» и закрыть её вкладки?")) {
+          send({ type: "groups.remove", groupId });
+        }
+      }
+    }
+  };
+
   window.rustle = {
     dispatch(message) {
       if (!message || typeof message.type !== "string") {
@@ -918,6 +1199,8 @@
         applyState(message.payload);
       } else if (message.type === "find.open") {
         openFind();
+      } else if (message.type === "menu.action") {
+        handleMenuAction(message.action);
       } else if (message.type === "storage.response") {
         const waiter = pending.get(message.id);
         if (!waiter) {
@@ -1019,6 +1302,18 @@
         send({ type: "tabs.close", id: Number(close.dataset.close) });
         return;
       }
+      const groupNew = event.target.closest("[data-group-new]");
+      if (groupNew) {
+        event.stopPropagation();
+        send({ type: "groups.newTab", groupId: Number(groupNew.dataset.groupNew) });
+        return;
+      }
+      const groupToggle = event.target.closest("[data-group-toggle]");
+      if (groupToggle) {
+        event.stopPropagation();
+        send({ type: "groups.toggle", groupId: Number(groupToggle.dataset.groupToggle) });
+        return;
+      }
       const tab = event.target.closest(".tab");
       if (tab) {
         send({ type: "tabs.activate", id: Number(tab.dataset.id) });
@@ -1035,14 +1330,28 @@
       }
     });
     tabs.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        const tab = event.target.closest(".tab");
-        if (tab) {
-          event.preventDefault();
-          send({ type: "tabs.activate", id: Number(tab.dataset.id) });
-        }
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+      const groupToggle = event.target.closest("[data-group-toggle]");
+      if (groupToggle) {
+        event.preventDefault();
+        send({ type: "groups.toggle", groupId: Number(groupToggle.dataset.groupToggle) });
+        return;
+      }
+      const tab = event.target.closest(".tab");
+      if (tab) {
+        event.preventDefault();
+        send({ type: "tabs.activate", id: Number(tab.dataset.id) });
       }
     });
+    document.addEventListener("wheel", (event) => {
+      if (!event.ctrlKey) {
+        return;
+      }
+      event.preventDefault();
+      send({ type: "zoom.wheel", delta: event.deltaY });
+    }, { passive: false });
 
     byId("new-tab").addEventListener("click", () => send({ type: "tabs.new" }));
 
@@ -1164,6 +1473,19 @@
       });
     }
 
+    const adblockUpdate = byId("adblock-update");
+    if (adblockUpdate) {
+      adblockUpdate.addEventListener("click", () => {
+        send({ type: "adblock.update" });
+        const status = byId("adblock-status");
+        if (status) {
+          status.textContent = "Обновление фильтров…";
+        }
+        adblockUpdate.disabled = true;
+        adblockUpdate.textContent = "Обновление…";
+      });
+    }
+
     const findInput = byId("find-input");
     if (findInput) {
       findInput.addEventListener("input", () => queryFind(true));
@@ -1210,95 +1532,60 @@
     }
 
     const menuToggle = byId("menu-toggle");
-    const appMenu = byId("app-menu");
-    const resetMenuPosition = () => {
-      if (!appMenu) {
-        return;
-      }
-      appMenu.classList.remove("app-menu--context");
-      appMenu.style.left = "";
-      appMenu.style.top = "";
-      appMenu.style.right = "";
-    };
-    const showMenu = (x, y) => {
-      if (!appMenu || !menuToggle) {
-        return;
-      }
-      if (typeof x === "number" && typeof y === "number") {
-        appMenu.classList.add("app-menu--context");
-        appMenu.style.left = Math.max(8, Math.min(x, window.innerWidth - 240)) + "px";
-        appMenu.style.top = Math.max(6, Math.min(y, 80)) + "px";
-        appMenu.style.right = "auto";
-      } else {
-        resetMenuPosition();
-      }
-      appMenu.hidden = false;
-      menuToggle.setAttribute("aria-expanded", "true");
-      send({ type: "ui.menu", open: true });
-    };
-    const closeMenu = () => {
-      if (appMenu && !appMenu.hidden) {
-        appMenu.hidden = true;
-        menuToggle?.setAttribute("aria-expanded", "false");
-        resetMenuPosition();
-        send({ type: "ui.menu", open: false });
-      }
-    };
-    if (menuToggle && appMenu) {
+    if (menuToggle) {
       menuToggle.addEventListener("click", (event) => {
         event.stopPropagation();
-        if (appMenu.hidden) {
-          showMenu();
-        } else {
-          closeMenu();
-        }
+        const rect = menuToggle.getBoundingClientRect();
+        send({
+          type: "ui.menu",
+          kind: "app",
+          origin: "chrome",
+          x: rect.left,
+          y: rect.bottom,
+        });
       });
-      appMenu.addEventListener("click", (event) => {
-        if (event.target.closest("[data-nav]")) {
-          closeMenu();
-        }
-      });
-      document.addEventListener("click", (event) => {
-        if (!event.target.closest("#app-menu, #menu-toggle")) {
-          closeMenu();
-        }
-      });
-      document.addEventListener("contextmenu", (event) => {
-        if (!event.target.closest(".toolbar, .tabs") || event.target.closest("input, textarea, select, #app-menu")) {
-          return;
-        }
+    }
+    document.addEventListener("contextmenu", (event) => {
+      if (event.target.closest("input, textarea, select")) {
+        return;
+      }
+      const tab = event.target.closest(".tab");
+      if (tab) {
         event.preventDefault();
-        showMenu(event.clientX, event.clientY);
-      });
-    }
-    const menuVertical = byId("menu-vertical");
-    if (menuVertical) {
-      menuVertical.addEventListener("click", () => {
-        send({ type: "ui.vertical", enabled: !current.vertical });
-        closeMenu();
-      });
-    }
-    const menuBookmark = byId("menu-bookmark");
-    if (menuBookmark) {
-      menuBookmark.addEventListener("click", async () => {
-        if (!current.url || !/^https?:\/\//.test(current.url)) {
-          closeMenu();
-          return;
-        }
-        try {
-          await request("bookmarks.toggle", {
-            url: current.url,
-            title: current.title || current.url,
-          });
-          const data = await request("bookmarks.list");
-          current.bookmarks = data.items || [];
-          renderShortcuts();
-        } catch (error) {
-          console.warn(error);
-        }
-        closeMenu();
-      });
-    }
+        send({
+          type: "ui.menu",
+          kind: "tab",
+          id: Number(tab.dataset.id),
+          origin: "chrome",
+          x: event.clientX,
+          y: event.clientY,
+        });
+        return;
+      }
+      const group = event.target.closest(".tab-group");
+      if (group) {
+        event.preventDefault();
+        send({
+          type: "ui.menu",
+          kind: "group",
+          groupId: Number(group.dataset.groupId),
+          origin: "chrome",
+          x: event.clientX,
+          y: event.clientY,
+        });
+        return;
+      }
+      if (event.target.closest(".toolbar, .tabs")) {
+        event.preventDefault();
+        send({
+          type: "ui.menu",
+          kind: "app",
+          origin: "chrome",
+          x: event.clientX,
+          y: event.clientY,
+        });
+      }
+    });
     const toolbarHome = byId("toolbar-home");
     if (toolbarHome) {
       toolbarHome.addEventListener("click", () => send({ type: "nav.go", url: "rustle://newtab" }));

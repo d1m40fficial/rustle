@@ -111,6 +111,8 @@ pub struct SessionTab {
     pub title: String,
     #[serde(default)]
     pub group: Option<u64>,
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

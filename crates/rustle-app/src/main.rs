@@ -2,13 +2,14 @@
 
 //! Rustle desktop browser.
 
+mod adblock;
 mod single_instance;
 mod storage_worker;
 
 use std::{
     borrow::Cow,
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     io::Read,
     path::{Path, PathBuf},
@@ -82,6 +83,15 @@ const SIDEBAR_URL: &str = "rustle://localhost/sidebar/index.html";
 const MAX_IPC_BYTES: usize = 64 * 1024;
 const MAX_CLOSED_TABS: usize = 25;
 
+/// WebView2 uses these switches to label its process tree in Task Manager.
+/// Without them Windows shows the generic "WebView2 Manager" name.
+fn webview_browser_args() -> String {
+    format!(
+        "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
+         --webview-exe-name=Rustle --webview-exe-version={VERSION}"
+    )
+}
+
 static START: OnceLock<Instant> = OnceLock::new();
 
 fn mark(label: &str) {
@@ -89,7 +99,6 @@ fn mark(label: &str) {
     println!("[startup] {:>5}ms {label}", start.elapsed().as_millis());
 }
 
-#[derive(Debug)]
 enum AppEvent {
     OpenUrl(String),
     StorageResponse { request_id: u64, payload: Value },
@@ -101,6 +110,8 @@ enum AppEvent {
     RefreshFavicon(TabId),
     FetchFavicons,
     FaviconFetched(TabId, String, Vec<u8>),
+    TileFavicons { request_id: u64, items: Value },
+    AdblockReady(adblock::AdblockEvent),
     Vertical(bool),
     CreateGroup { name: String, tab: Option<TabId> },
     ToggleGroup(u64),
@@ -129,9 +140,15 @@ struct Tab {
     webview: Option<WebView>,
     nav_id: u64,
     return_url: Option<String>,
+    return_title: Option<String>,
     favicon: Option<String>,
     zoom: f64,
     group: Option<u64>,
+    pinned: bool,
+    blocked: u64,
+    cosmetic_generic: bool,
+    cosmetic_exceptions: HashSet<String>,
+    cosmetic_injected: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -154,9 +171,15 @@ impl Tab {
             webview: None,
             nav_id: 0,
             return_url: None,
+            return_title: None,
             favicon: None,
             zoom: 1.0,
             group: None,
+            pinned: false,
+            blocked: 0,
+            cosmetic_generic: true,
+            cosmetic_exceptions: HashSet::new(),
+            cosmetic_injected: HashSet::new(),
         }
     }
 }
@@ -197,7 +220,6 @@ struct AppState {
     dropdown_open: bool,
     dropdown_height: u32,
     bookmarks: Vec<BookmarkEntry>,
-    menu_open: bool,
     find_open: bool,
     permissions: HashMap<String, bool>,
     downloads: Vec<DownloadEntry>,
@@ -209,6 +231,8 @@ struct AppState {
     layout_anim: Option<LayoutAnimation>,
     groups: Vec<TabGroup>,
     next_group_id: u64,
+    adblock_engine: Option<adblock::FilterEngine>,
+    adblock_info: adblock::AdblockInfo,
 }
 
 struct LayoutAnimation {
@@ -246,7 +270,6 @@ impl AppState {
             dropdown_open: false,
             dropdown_height: 360,
             bookmarks: Vec::new(),
-            menu_open: false,
             find_open: false,
             permissions: HashMap::new(),
             downloads: Vec::new(),
@@ -258,6 +281,8 @@ impl AppState {
             layout_anim: None,
             groups: Vec::new(),
             next_group_id: 1,
+            adblock_engine: None,
+            adblock_info: adblock::AdblockInfo::default(),
         }
     }
 
@@ -456,6 +481,7 @@ fn save_session_state(state: &Rc<RefCell<AppState>>, clean_exit: bool) {
                     url: session_url(&tab.url),
                     title: tab.title.clone(),
                     group: tab.group,
+                    pinned: tab.pinned,
                 })
                 .collect(),
             closed: state
@@ -465,6 +491,7 @@ fn save_session_state(state: &Rc<RefCell<AppState>>, clean_exit: bool) {
                     url: session_url(&tab.url),
                     title: tab.title.clone(),
                     group: None,
+                    pinned: false,
                 })
                 .collect(),
             groups: state
@@ -527,13 +554,16 @@ fn restore_session(state: &Rc<RefCell<AppState>>, session: Option<Session>) {
             });
             let favicon = cached_favicon(&url);
             let id = push_tab(&mut state, url, tab.title);
-            if let Some(tab) = state.tab_mut(id) {
-                tab.favicon = favicon;
-                tab.group = group;
+            if let Some(entry) = state.tab_mut(id) {
+                entry.favicon = favicon;
+                entry.pinned = tab.pinned;
+                entry.group = if tab.pinned { None } else { group };
             }
         }
         let active_index = session.active.min(state.tabs.len().saturating_sub(1));
-        state.active = state.tabs[active_index].id;
+        let active_id = state.tabs[active_index].id;
+        state.tabs.sort_by_key(|tab| !tab.pinned);
+        state.active = active_id;
         let active_collapsed = state
             .tab(state.active)
             .and_then(|tab| tab.group)
@@ -581,7 +611,9 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                     "faviconData": tab.favicon.as_deref().and_then(favicon_data),
                     "loading": tab.loading,
                     "active": tab.id == state.active,
-                      "groupId": tab.group,
+                    "groupId": tab.group,
+                    "pinned": tab.pinned,
+                    "blocked": tab.blocked,
                     "error": tab.error.clone(),
                 })
             })
@@ -655,6 +687,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                 "clearOnExit": state.settings.clear_on_exit,
                 "adblock": state.settings.adblock,
             },
+            "adblockStatus": state.adblock_info.to_json(),
             "downloads": downloads_payload(&state),
         });
 
@@ -823,6 +856,303 @@ fn raise_sidebar(state: &Rc<RefCell<AppState>>) {
 }
 
 #[cfg(target_os = "windows")]
+mod native_menu {
+    use super::{AppState, TabId};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use tao::platform::windows::WindowExtWindows;
+    use wry::WebViewExtWindows;
+
+    #[repr(C)]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn ClientToScreen(hwnd: isize, point: *mut Point) -> i32;
+        fn CreatePopupMenu() -> isize;
+        fn DestroyMenu(menu: isize) -> i32;
+        fn AppendMenuW(menu: isize, flags: u32, id: usize, text: *const u16) -> i32;
+        fn TrackPopupMenu(
+            menu: isize,
+            flags: u32,
+            x: i32,
+            y: i32,
+            reserved: i32,
+            hwnd: isize,
+            rect: *const core::ffi::c_void,
+        ) -> i32;
+        fn SetForegroundWindow(hwnd: isize) -> i32;
+    }
+
+    const MF_STRING: u32 = 0x0000;
+    const MF_SEPARATOR: u32 = 0x0800;
+    const MF_CHECKED: u32 = 0x0008;
+    const TPM_RETURNCMD: u32 = 0x0100;
+    const TPM_NONOTIFY: u32 = 0x0080;
+    const TPM_RIGHTBUTTON: u32 = 0x0002;
+
+    #[derive(Clone, Copy)]
+    pub enum Origin {
+        Chrome,
+        Sidebar,
+    }
+
+    pub enum Kind {
+        App,
+        Tab(TabId),
+        Group(u64),
+    }
+
+    struct Entry {
+        action: String,
+        label: String,
+        checked: bool,
+        separator: bool,
+    }
+
+    fn push(items: &mut Vec<Entry>, action: &str, label: &str) {
+        items.push(Entry {
+            action: action.to_owned(),
+            label: label.to_owned(),
+            checked: false,
+            separator: false,
+        });
+    }
+
+    fn push_checked(items: &mut Vec<Entry>, action: &str, label: &str, checked: bool) {
+        items.push(Entry {
+            action: action.to_owned(),
+            label: label.to_owned(),
+            checked,
+            separator: false,
+        });
+    }
+
+    fn separator(items: &mut Vec<Entry>) {
+        items.push(Entry {
+            action: String::new(),
+            label: String::new(),
+            checked: false,
+            separator: true,
+        });
+    }
+
+    fn app_items(state: &AppState, items: &mut Vec<Entry>) {
+        push(items, "app.newtab", "Новая вкладка");
+        push(items, "app.reopen", "Вернуть закрытую вкладку");
+        separator(items);
+        push(items, "app.history", "История");
+        push(items, "app.bookmarks", "Закладки");
+        push(items, "app.downloads", "Загрузки");
+        push(items, "app.settings", "Настройки");
+        if state
+            .active_tab()
+            .is_some_and(|tab| tab.url.starts_with("http"))
+        {
+            push(items, "app.bookmark", "Добавить в закладки");
+        }
+        separator(items);
+        push_checked(
+            items,
+            "app.vertical",
+            "Вертикальные вкладки",
+            state.vertical,
+        );
+    }
+
+    pub fn show(state: &Rc<RefCell<AppState>>, kind: Kind, origin: Origin, x: i32, y: i32) {
+        let (hwnd, owner, scale, entries) = {
+            let state = state.borrow();
+            let scale = state.window.scale_factor();
+            let owner = state.window.hwnd();
+            let hwnd = match origin {
+                Origin::Chrome => state.chrome.as_ref().map(|view| view.hwnd().0 as isize),
+                Origin::Sidebar => state.sidebar.as_ref().map(|view| view.hwnd().0 as isize),
+            };
+            let Some(hwnd) = hwnd else {
+                return;
+            };
+            let mut entries = Vec::new();
+            match kind {
+                Kind::App => app_items(&state, &mut entries),
+                Kind::Tab(id) => {
+                    if let Some(tab) = state.tab(id) {
+                        if tab.pinned {
+                            push(
+                                &mut entries,
+                                &format!("tab.unpin:{}", id.0),
+                                "Открепить вкладку",
+                            );
+                        } else {
+                            push(
+                                &mut entries,
+                                &format!("tab.pin:{}", id.0),
+                                "Закрепить вкладку",
+                            );
+                        }
+                        if !tab.pinned {
+                            separator(&mut entries);
+                            push(
+                                &mut entries,
+                                &format!("tab.newgroup:{}", id.0),
+                                "Новая группа…",
+                            );
+                            for group in &state.groups {
+                                if tab.group == Some(group.id) {
+                                    continue;
+                                }
+                                push(
+                                    &mut entries,
+                                    &format!("tab.group:{}:{}", id.0, group.id),
+                                    &format!("В группу «{}»", group.name),
+                                );
+                            }
+                            if tab.group.is_some() {
+                                push(
+                                    &mut entries,
+                                    &format!("tab.ungroup:{}", id.0),
+                                    "Убрать из группы",
+                                );
+                            }
+                        }
+                        separator(&mut entries);
+                        push(
+                            &mut entries,
+                            &format!("tab.close:{}", id.0),
+                            "Закрыть вкладку",
+                        );
+                    }
+                }
+                Kind::Group(group_id) => {
+                    if let Some(group) = state.groups.iter().find(|group| group.id == group_id) {
+                        push_checked(
+                            &mut entries,
+                            &format!("group.toggle:{group_id}"),
+                            if group.collapsed {
+                                "Развернуть группу"
+                            } else {
+                                "Свернуть группу"
+                            },
+                            group.collapsed,
+                        );
+                        push(
+                            &mut entries,
+                            &format!("group.newtab:{group_id}"),
+                            "Новая вкладка в группе",
+                        );
+                        push(
+                            &mut entries,
+                            &format!("group.rename:{group_id}"),
+                            "Переименовать группу…",
+                        );
+                        push(
+                            &mut entries,
+                            &format!("group.remove:{group_id}"),
+                            "Удалить группу",
+                        );
+                    }
+                }
+            }
+            (hwnd, owner, scale, entries)
+        };
+
+        if entries.is_empty() {
+            return;
+        }
+
+        let mut point = Point {
+            x: (x as f64 * scale).round() as i32,
+            y: (y as f64 * scale).round() as i32,
+        };
+        unsafe {
+            if ClientToScreen(hwnd, &mut point) == 0 {
+                return;
+            }
+        }
+
+        let menu = unsafe { CreatePopupMenu() };
+        if menu == 0 {
+            return;
+        }
+        let mut actions = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.into_iter().enumerate() {
+            if entry.separator {
+                unsafe {
+                    AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
+                }
+                actions.push(String::new());
+                continue;
+            }
+            let mut wide: Vec<u16> = entry.label.replace('&', "&&").encode_utf16().collect();
+            wide.push(0);
+            let flags = MF_STRING | if entry.checked { MF_CHECKED } else { 0 };
+            unsafe {
+                AppendMenuW(menu, flags, index + 1, wide.as_ptr());
+            }
+            actions.push(entry.action);
+        }
+
+        unsafe {
+            SetForegroundWindow(owner);
+        }
+        let command = unsafe {
+            TrackPopupMenu(
+                menu,
+                TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
+                point.x,
+                point.y,
+                0,
+                owner,
+                std::ptr::null(),
+            )
+        };
+        unsafe {
+            DestroyMenu(menu);
+        }
+        if command <= 0 {
+            return;
+        }
+        let Some(action) = actions.get(command as usize - 1).cloned() else {
+            return;
+        };
+        if action.is_empty() {
+            return;
+        }
+        let action = serde_json::to_string(&action).unwrap_or_else(|_| "\"\"".to_owned());
+        let script = format!(
+            "window.rustle && window.rustle.dispatch({{type:'menu.action',action:{action}}});"
+        );
+        if let Some(chrome) = &state.borrow().chrome {
+            let _ = chrome.evaluate_script(&script);
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+mod native_menu {
+    use super::{AppState, TabId};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    #[derive(Clone, Copy)]
+    pub enum Origin {
+        Chrome,
+        Sidebar,
+    }
+
+    pub enum Kind {
+        App,
+        Tab(TabId),
+        Group(u64),
+    }
+
+    pub fn show(_state: &Rc<RefCell<AppState>>, _kind: Kind, _origin: Origin, _x: i32, _y: i32) {}
+}
+
+#[cfg(target_os = "windows")]
 fn start_window_drag(window: &Window) {
     const WM_NCLBUTTONDOWN: u32 = 0x00A1;
     const HTCAPTION: isize = 2;
@@ -870,7 +1200,6 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
         find_open,
         vertical,
         sidebar_collapsed,
-        menu_open,
     ) = {
         let state = state.borrow();
         let overlay_mode = state.active_tab().is_some_and(|tab| {
@@ -886,7 +1215,6 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             state.find_open,
             state.vertical,
             state.sidebar_collapsed,
-            state.menu_open,
         )
     };
 
@@ -927,8 +1255,6 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
         (dropdown_height + top.saturating_sub(CHROME_COLLAPSED)).clamp(top, height)
     } else if find_open {
         (top + 44).min(height)
-    } else if menu_open {
-        (top + 250).min(height)
     } else {
         top
     };
@@ -1031,6 +1357,9 @@ fn on_navigation(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: String) {
         tab.favicon = cached_favicon(&tab.url);
         tab.title.clear();
         tab.loading = true;
+        tab.cosmetic_generic = true;
+        tab.cosmetic_injected.clear();
+        tab.cosmetic_exceptions.clear();
         had_error && active == tab_id
     };
 
@@ -1102,6 +1431,7 @@ fn on_page_load(state: &Rc<RefCell<AppState>>, tab_id: TabId, event: PageLoadEve
                 .map(|tab| tab.url.clone())
                 .unwrap_or_default();
             fetch_site_favicon(state, tab_id, &page_url);
+            apply_cosmetic_filters(state, tab_id);
             let proxy = state.borrow().proxy.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(1800));
@@ -1156,6 +1486,7 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
         ))
         .with_visible(visible)
         .with_browser_accelerator_keys(false)
+        .with_additional_browser_args(webview_browser_args())
         .with_custom_protocol("rustle".into(), protocol_handler)
         .with_navigation_handler(move |url| {
             on_navigation(&navigation_state, tab_id, url);
@@ -1177,7 +1508,43 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
                  event.preventDefault(); \
                  window.ipc.postMessage(JSON.stringify({ type: 'zoom.wheel', delta: event.deltaY })); \
                } \
-             }, { passive: false });",
+             }, { passive: false }); \
+             (function () { \
+               if (window.top !== window) { return; } \
+               if (window.__rustleAdblockScan) { return; } \
+               window.__rustleAdblockScan = true; \
+               var sentClasses = new Set(); \
+               var sentIds = new Set(); \
+               function scan() { \
+                 if (!document.body || !window.ipc) { return; } \
+                 var classes = []; \
+                 var ids = []; \
+                 var nodes = document.querySelectorAll('[class],[id]'); \
+                 for (var i = 0; i < nodes.length; i++) { \
+                   var node = nodes[i]; \
+                   var cls = node.classList; \
+                   for (var j = 0; cls && j < cls.length; j++) { \
+                     if (!sentClasses.has(cls[j])) { sentClasses.add(cls[j]); classes.push(cls[j]); } \
+                   } \
+                   var id = node.id; \
+                   if (id && !sentIds.has(id)) { sentIds.add(id); ids.push(id); } \
+                 } \
+                 if (classes.length || ids.length) { \
+                   window.ipc.postMessage(JSON.stringify({ type: 'adblock.scan', classes: classes, ids: ids })); \
+                 } \
+               } \
+               window.__rustleAdblockRescan = function () { \
+                 sentClasses.clear(); sentIds.clear(); scan(); \
+               }; \
+               if (document.readyState === 'loading') { \
+                 document.addEventListener('DOMContentLoaded', scan, { once: true }); \
+               } else { scan(); } \
+               var timer = 0; \
+               new MutationObserver(function () { \
+                 clearTimeout(timer); \
+                 timer = setTimeout(scan, 250); \
+               }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'id'] }); \
+             })();",
         )
         .with_ipc_handler({
             let proxy = proxy.clone();
@@ -1225,7 +1592,7 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
             install_permission_handler(state, webview);
             install_crash_handler(state, webview, tab_id);
             install_zoom_handler(state, webview, tab_id);
-            install_adblock_handler(state, webview);
+            install_adblock_handler(state, webview, tab_id);
             if !state.borrow().private {
                 install_favicon_handler(state, webview, tab_id);
             }
@@ -1255,12 +1622,12 @@ fn navigate_active(state: &Rc<RefCell<AppState>>, input: &str) {
     };
 
     let active = state.borrow().active;
-    let previous_url = {
+    let (previous_url, previous_title) = {
         let state = state.borrow();
         let Some(tab) = state.tab(active) else {
             return;
         };
-        tab.url.clone()
+        (tab.url.clone(), effective_tab_title(tab))
     };
 
     if is_overlay_url(&url) {
@@ -1271,6 +1638,7 @@ fn navigate_active(state: &Rc<RefCell<AppState>>, input: &str) {
             };
             if !is_overlay_url(&previous_url) && !previous_url.is_empty() {
                 tab.return_url = Some(previous_url);
+                tab.return_title = Some(previous_title);
             }
             tab.url = url.clone();
             tab.title = fallback_title(&url);
@@ -1385,12 +1753,45 @@ fn go_back_active(state: &Rc<RefCell<AppState>>) {
             return;
         };
         if is_overlay_url(&tab.url) {
-            tab.return_url.clone()
+            tab.return_url.clone().map(|url| {
+                let restorable = tab.webview.is_some()
+                    && tab.error.is_none()
+                    && !url.is_empty()
+                    && !is_overlay_url(&url);
+                (url, restorable)
+            })
         } else {
             None
         }
     };
-    if let Some(url) = overlay_return {
+    if let Some((url, restorable)) = overlay_return {
+        if restorable {
+            // The content WebView is still alive underneath the internal page.
+            // Bring it back without navigating: re-loading it here used to leave
+            // the tab spinner running forever when the site was restored.
+            {
+                let mut state = state.borrow_mut();
+                let Some(tab) = state.tab_mut(active) else {
+                    return;
+                };
+                let restored_title = tab
+                    .return_title
+                    .take()
+                    .filter(|title| !title.is_empty())
+                    .unwrap_or_else(|| fallback_title(&url));
+                tab.return_url = None;
+                tab.url = url;
+                tab.title = restored_title;
+                tab.loading = false;
+                tab.error = None;
+            }
+            sync_tab_from_webview(state, active);
+            apply_layout(state);
+            focus_active_content(state);
+            push_ui_state(state);
+            save_session_state(state, false);
+            return;
+        }
         navigate_active(state, &url);
         return;
     }
@@ -1746,6 +2147,45 @@ fn new_tab(state: &Rc<RefCell<AppState>>) {
     };
     activate_tab(state, id);
     focus_address(state);
+}
+
+fn set_tab_pinned(state: &Rc<RefCell<AppState>>, id: TabId, pinned: bool) {
+    {
+        let mut state = state.borrow_mut();
+        let Some(index) = state.tab_index(id) else {
+            return;
+        };
+        if state.tabs[index].pinned == pinned {
+            return;
+        }
+        let mut tab = state.tabs.remove(index);
+        tab.pinned = pinned;
+        if pinned {
+            tab.group = None;
+        }
+        let pinned_count = state.tabs.iter().filter(|entry| entry.pinned).count();
+        let insert_at = pinned_count.min(state.tabs.len());
+        state.tabs.insert(insert_at, tab);
+    }
+    push_ui_state(state);
+    apply_layout(state);
+    save_session_state(state, false);
+}
+
+fn rename_group(state: &Rc<RefCell<AppState>>, group_id: u64, name: String) {
+    let name = name.trim();
+    if name.is_empty() {
+        return;
+    }
+    {
+        let mut state = state.borrow_mut();
+        let Some(group) = state.groups.iter_mut().find(|entry| entry.id == group_id) else {
+            return;
+        };
+        group.name = name.to_owned();
+    }
+    push_ui_state(state);
+    save_session_due(state);
 }
 
 fn tab_group_collapsed(groups: &[TabGroup], group: Option<u64>) -> bool {
@@ -2534,6 +2974,54 @@ fn download_image(url: &str) -> Option<Vec<u8>> {
     (image_mime(&bytes) != "application/octet-stream").then_some(bytes)
 }
 
+fn download_site_favicon(page_url: &str) -> Option<Vec<u8>> {
+    let parsed = Url::parse(page_url).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    let origin = format!(
+        "{}://{}",
+        parsed.scheme(),
+        parsed.host_str().unwrap_or_default()
+    );
+    let icon_url = format!("{origin}/favicon.ico");
+    download_image(&icon_url).or_else(|| {
+        let response = ureq::get(page_url)
+            .timeout(Duration::from_secs(7))
+            .call()
+            .ok()?;
+        if response.status() != 200 {
+            return None;
+        }
+        let mut html = String::new();
+        response
+            .into_reader()
+            .take(512 * 1024)
+            .read_to_string(&mut html)
+            .ok()?;
+        let href = icon_href_from_html(&html)?;
+        let icon = Url::parse(page_url).ok()?.join(&href).ok()?;
+        download_image(icon.as_str())
+    })
+}
+
+fn favicon_for_url(url: &str) -> Option<String> {
+    let parsed = Url::parse(url).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    let name = favicon_name(url);
+    let path = favicon_cache_path(&name);
+    if !path.exists() {
+        let bytes = download_site_favicon(url)?;
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        fs::write(&path, bytes).ok()?;
+    }
+    favicon_data(&name)
+}
+
 fn fetch_site_favicon(state: &Rc<RefCell<AppState>>, tab_id: TabId, page_url: &str) {
     let proxy = state.borrow().proxy.clone();
     let private = state.borrow().private;
@@ -2546,33 +3034,10 @@ fn fetch_site_favicon(state: &Rc<RefCell<AppState>>, tab_id: TabId, page_url: &s
     if !matches!(parsed.scheme(), "http" | "https") {
         return;
     }
-    let Some(host) = parsed.host_str() else {
-        return;
-    };
-    let origin = format!("{}://{}", parsed.scheme(), host);
-    let icon_url = format!("{origin}/favicon.ico");
     let name = favicon_name(page_url);
     let page_owned = page_url.to_owned();
     std::thread::spawn(move || {
-        let bytes = download_image(&icon_url).or_else(|| {
-            let response = ureq::get(&page_owned)
-                .timeout(Duration::from_secs(7))
-                .call()
-                .ok()?;
-            if response.status() != 200 {
-                return None;
-            }
-            let mut html = String::new();
-            response
-                .into_reader()
-                .take(512 * 1024)
-                .read_to_string(&mut html)
-                .ok()?;
-            let href = icon_href_from_html(&html)?;
-            let icon = Url::parse(&page_owned).ok()?.join(&href).ok()?;
-            download_image(icon.as_str())
-        });
-        if let Some(bytes) = bytes {
+        if let Some(bytes) = download_site_favicon(&page_owned) {
             let _ = proxy.send_event(AppEvent::FaviconFetched(tab_id, name, bytes));
         }
     });
@@ -2921,6 +3386,112 @@ fn find_in_page(state: &Rc<RefCell<AppState>>, text: &str, forward: bool) {
     }
 }
 
+fn css_hide_script(css: &str) -> String {
+    let css = serde_json::to_string(css).unwrap_or_else(|_| "\"\"".to_owned());
+    format!(
+        "(function(){{var css={css};try{{var sheet=new CSSStyleSheet();sheet.replaceSync(css);document.adoptedStyleSheets=document.adoptedStyleSheets.concat([sheet]);}}catch(e){{}}var id='rustle-adblock';var s=document.getElementById(id);if(!s){{s=document.createElement('style');s.id=id;(document.head||document.documentElement).appendChild(s);}}s.textContent+=css;}})();"
+    )
+}
+
+fn hide_css(selectors: &[String]) -> String {
+    selectors
+        .iter()
+        .filter(|selector| !selector.trim().is_empty())
+        .map(|selector| format!("{selector}{{display:none !important;}}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn apply_cosmetic_filters(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
+    if !state.borrow().settings.adblock {
+        return;
+    }
+    let cosmetic = {
+        let state = state.borrow();
+        let Some(tab) = state.tab(tab_id) else {
+            return;
+        };
+        if !(tab.url.starts_with("http://") || tab.url.starts_with("https://")) {
+            return;
+        }
+        let Some(engine) = &state.adblock_engine else {
+            return;
+        };
+        adblock::cosmetic(engine, &tab.url)
+    };
+    {
+        let mut state = state.borrow_mut();
+        if let Some(tab) = state.tab_mut(tab_id) {
+            tab.cosmetic_generic = !cosmetic.generichide;
+            tab.cosmetic_exceptions = cosmetic.exceptions;
+            tab.cosmetic_injected.clear();
+        }
+    }
+    if !cosmetic.hide_selectors.is_empty() {
+        let script = css_hide_script(&hide_css(&cosmetic.hide_selectors));
+        if let Some(webview) = state
+            .borrow()
+            .tab(tab_id)
+            .and_then(|tab| tab.webview.as_ref())
+        {
+            let _ = webview.evaluate_script(&script);
+        }
+    }
+    if !cosmetic.injected_script.is_empty() {
+        if let Some(webview) = state
+            .borrow()
+            .tab(tab_id)
+            .and_then(|tab| tab.webview.as_ref())
+        {
+            let _ = webview.evaluate_script(&cosmetic.injected_script);
+        }
+    }
+}
+
+fn apply_generic_cosmetic_filters(
+    state: &Rc<RefCell<AppState>>,
+    tab_id: TabId,
+    classes: &[String],
+    ids: &[String],
+) {
+    let fresh = {
+        let state = state.borrow();
+        let Some(tab) = state.tab(tab_id) else {
+            return;
+        };
+        if !tab.cosmetic_generic {
+            return;
+        }
+        let Some(engine) = &state.adblock_engine else {
+            return;
+        };
+        adblock::generic_selectors(engine, classes, ids, &tab.cosmetic_exceptions)
+    };
+    let new_selectors = {
+        let mut state = state.borrow_mut();
+        let Some(tab) = state.tab_mut(tab_id) else {
+            return;
+        };
+        let mut new_selectors = Vec::new();
+        for selector in fresh {
+            if tab.cosmetic_injected.insert(selector.clone()) {
+                new_selectors.push(selector);
+            }
+        }
+        new_selectors
+    };
+    if !new_selectors.is_empty() {
+        let script = css_hide_script(&hide_css(&new_selectors));
+        if let Some(webview) = state
+            .borrow()
+            .tab(tab_id)
+            .and_then(|tab| tab.webview.as_ref())
+        {
+            let _ = webview.evaluate_script(&script);
+        }
+    }
+}
+
 fn maybe_upgrade_https(url: String, enabled: bool) -> String {
     if !enabled {
         return url;
@@ -3079,21 +3650,39 @@ fn install_zoom_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, tab_id
 fn install_zoom_handler(_state: &Rc<RefCell<AppState>>, _webview: &WebView, _tab_id: TabId) {}
 
 #[cfg(target_os = "windows")]
-fn install_adblock_handler(state: &Rc<RefCell<AppState>>, webview: &WebView) {
-    const BLOCKED: &[&str] = &[
-        "doubleclick.net",
-        "googlesyndication.com",
-        "googleadservices.com",
-        "adservice.google.com",
-        "adnxs.com",
-        "criteo.com",
-        "taboola.com",
-        "outbrain.com",
-        "scorecardresearch.com",
-        "quantserve.com",
-        "zedo.com",
-        "popads.net",
-    ];
+fn adblock_request_type(
+    context: webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_WEB_RESOURCE_CONTEXT,
+) -> &'static str {
+    use webview2_com::Microsoft::Web::WebView2::Win32::*;
+    if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT {
+        "document"
+    } else if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE {
+        "image"
+    } else if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_STYLESHEET {
+        "stylesheet"
+    } else if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_SCRIPT {
+        "script"
+    } else if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_XML_HTTP_REQUEST
+        || context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FETCH
+    {
+        "xmlhttprequest"
+    } else if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FONT {
+        "font"
+    } else if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MEDIA {
+        "media"
+    } else if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_WEBSOCKET {
+        "websocket"
+    } else if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_PING {
+        "ping"
+    } else {
+        "other"
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn install_adblock_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, tab_id: TabId) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_WEB_RESOURCE_CONTEXT;
+
     let environment = webview.environment();
     let state = Rc::clone(state);
     let mut token = 0;
@@ -3112,21 +3701,49 @@ fn install_adblock_handler(state: &Rc<RefCell<AppState>>, webview: &WebView) {
             let _ = request.Uri(&mut raw);
         }
         let url = unsafe { raw.to_string().unwrap_or_default() };
-        let blocked = Url::parse(&url)
-            .ok()
-            .and_then(|parsed| parsed.host_str().map(str::to_owned))
-            .is_some_and(|host| BLOCKED.iter().any(|domain| host.ends_with(domain)));
-        if blocked {
-            if let Ok(response) = unsafe {
-                environment.CreateWebResourceResponse(
-                    None::<&IStream>,
-                    403,
-                    PCWSTR::null(),
-                    PCWSTR::null(),
-                )
-            } {
+        if !(url.starts_with("http://") || url.starts_with("https://")) {
+            return Ok(());
+        }
+        let mut context = COREWEBVIEW2_WEB_RESOURCE_CONTEXT(0);
+        unsafe {
+            let _ = args.ResourceContext(&mut context);
+        }
+        let request_type = adblock_request_type(context);
+        let source_url = state
+            .borrow()
+            .tab(tab_id)
+            .map(|tab| tab.url.clone())
+            .unwrap_or_default();
+        let outcome = {
+            let state = state.borrow();
+            let Some(engine) = &state.adblock_engine else {
+                return Ok(());
+            };
+            adblock::check(engine, &url, &source_url, request_type)
+        };
+        match outcome {
+            adblock::Match::Allow => {}
+            adblock::Match::Block => {
+                if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+                    tab.blocked += 1;
+                }
+                if let Ok(response) = unsafe {
+                    environment.CreateWebResourceResponse(
+                        None::<&IStream>,
+                        403,
+                        PCWSTR::null(),
+                        PCWSTR::null(),
+                    )
+                } {
+                    unsafe {
+                        let _ = args.SetResponse(&response);
+                    }
+                }
+            }
+            adblock::Match::Rewrite(rewritten) => {
+                let wide: Vec<u16> = rewritten.encode_utf16().chain(Some(0)).collect();
                 unsafe {
-                    let _ = args.SetResponse(&response);
+                    let _ = request.SetUri(PCWSTR(wide.as_ptr()));
                 }
             }
         }
@@ -3145,7 +3762,7 @@ fn install_adblock_handler(state: &Rc<RefCell<AppState>>, webview: &WebView) {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn install_adblock_handler(_state: &Rc<RefCell<AppState>>, _webview: &WebView) {}
+fn install_adblock_handler(_state: &Rc<RefCell<AppState>>, _webview: &WebView, _tab_id: TabId) {}
 
 fn storage_query(state: &Rc<RefCell<AppState>>, request_id: u64, query: StorageQuery) {
     if let Some(storage) = &state.borrow().storage {
@@ -3223,6 +3840,23 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                     .borrow()
                     .proxy
                     .send_event(AppEvent::Activate(TabId(id)));
+            }
+        }
+        Some("tabs.pin") => {
+            if let Some(id) = message.get("id").and_then(|value| value.as_u64()) {
+                let pinned = message
+                    .get("pinned")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(true);
+                set_tab_pinned(state, TabId(id), pinned);
+            }
+        }
+        Some("groups.rename") => {
+            if let (Some(id), Some(name)) = (
+                message.get("groupId").and_then(|value| value.as_u64()),
+                message.get("name").and_then(|value| value.as_str()),
+            ) {
+                rename_group(state, id, name.to_owned());
             }
         }
         Some("groups.create") => {
@@ -3363,6 +3997,42 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 );
             }
         }
+        Some("favicon.query") => {
+            if let Some(request_id) = message.get("id").and_then(|value| value.as_u64()) {
+                let urls: Vec<String> = message
+                    .get("urls")
+                    .and_then(|value| value.as_array())
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| item.as_str().map(str::to_owned))
+                            .take(96)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let private = state.borrow().private;
+                let proxy = state.borrow().proxy.clone();
+                if private || urls.is_empty() {
+                    let _ = proxy.send_event(AppEvent::TileFavicons {
+                        request_id,
+                        items: Value::Object(serde_json::Map::new()),
+                    });
+                } else {
+                    std::thread::spawn(move || {
+                        let mut items = serde_json::Map::new();
+                        for url in urls {
+                            if let Some(data) = favicon_for_url(&url) {
+                                items.insert(url, Value::String(data));
+                            }
+                        }
+                        let _ = proxy.send_event(AppEvent::TileFavicons {
+                            request_id,
+                            items: Value::Object(items),
+                        });
+                    });
+                }
+            }
+        }
         Some("suggest.query") => {
             if let Some(request_id) = message.get("id").and_then(|value| value.as_u64()) {
                 let query = message
@@ -3417,6 +4087,14 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             start_window_drag(&window);
         }
         Some("zoom.reset") => apply_zoom(state, 1.0),
+        Some("zoom.wheel") => {
+            let delta = message
+                .get("delta")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0);
+            let step = if delta < 0.0 { 0.1 } else { -0.1 };
+            zoom_active(state, step);
+        }
         Some("tabs.newUrl") => {
             if let Some(url) = message.get("url").and_then(|value| value.as_str()) {
                 let _ = state
@@ -3448,18 +4126,31 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             find_in_page(state, text, forward);
         }
         Some("ui.menu") => {
-            let open = message
-                .get("open")
-                .and_then(|value| value.as_bool())
-                .unwrap_or(false);
-            let changed = {
-                let mut state = state.borrow_mut();
-                let changed = state.menu_open != open;
-                state.menu_open = open;
-                changed
+            let origin = match message.get("origin").and_then(|value| value.as_str()) {
+                Some("sidebar") => native_menu::Origin::Sidebar,
+                _ => native_menu::Origin::Chrome,
             };
-            if changed {
-                apply_layout(state);
+            let x = message
+                .get("x")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0);
+            let y = message
+                .get("y")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0);
+            let kind = match message.get("kind").and_then(|value| value.as_str()) {
+                Some("tab") => message
+                    .get("id")
+                    .and_then(|value| value.as_u64())
+                    .map(|id| native_menu::Kind::Tab(TabId(id))),
+                Some("group") => message
+                    .get("groupId")
+                    .and_then(|value| value.as_u64())
+                    .map(native_menu::Kind::Group),
+                _ => Some(native_menu::Kind::App),
+            };
+            if let Some(kind) = kind {
+                native_menu::show(state, kind, origin, x as i32, y as i32);
             }
         }
         Some("ui.dropdown") => {
@@ -3481,6 +4172,10 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             if changed {
                 apply_layout(state);
             }
+        }
+        Some("adblock.update") => {
+            let proxy = state.borrow().proxy.clone();
+            adblock::spawn_loader(proxy, true, true);
         }
         Some("data.clear") => clear_browsing_data(state),
         Some("downloads.cancel") => {
@@ -3604,6 +4299,7 @@ fn create_sidebar(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
             height.saturating_sub(CHROME_VERTICAL),
         ))
         .with_browser_accelerator_keys(false)
+        .with_additional_browser_args(webview_browser_args())
         .with_custom_protocol("rustle".into(), protocol_handler)
         .with_url(SIDEBAR_URL)
         .with_ipc_handler(move |request| handle_ipc(&ipc_state, request.body()))
@@ -3645,6 +4341,7 @@ fn create_chrome(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
     let result = WebViewBuilder::new_with_web_context(&mut context)
         .with_bounds(rect(0, 0, width, CHROME_COLLAPSED))
         .with_browser_accelerator_keys(false)
+        .with_additional_browser_args(webview_browser_args())
         .with_custom_protocol("rustle".into(), protocol_handler)
         .with_url(CHROME_URL)
         .with_ipc_handler(move |request| handle_ipc(&ipc_state, request.body()))
@@ -3883,6 +4580,8 @@ fn main() -> wry::Result<()> {
         };
     }
 
+    adblock::spawn_loader(proxy.clone(), false, !private);
+
     let session = if private || settings.startup == "newtab" {
         None
     } else {
@@ -3984,17 +4683,48 @@ fn main() -> wry::Result<()> {
             }
             Event::UserEvent(AppEvent::ContentIpc(tab_id, body)) => {
                 if let Ok(message) = serde_json::from_str::<Value>(&body) {
-                    if message.get("type").and_then(Value::as_str) == Some("zoom.wheel") {
-                        let delta = message.get("delta").and_then(Value::as_f64).unwrap_or(0.0);
-                        if state.borrow().active == tab_id {
-                            let step = if delta < 0.0 { 0.1 } else { -0.1 };
-                            let factor = state
-                                .borrow()
-                                .tab(tab_id)
-                                .map(|tab| tab.zoom + step)
-                                .unwrap_or(1.0);
-                            apply_zoom(&state, factor);
+                    match message.get("type").and_then(Value::as_str) {
+                        Some("zoom.wheel") => {
+                            let delta =
+                                message.get("delta").and_then(Value::as_f64).unwrap_or(0.0);
+                            if state.borrow().active == tab_id {
+                                let step = if delta < 0.0 { 0.1 } else { -0.1 };
+                                let factor = state
+                                    .borrow()
+                                    .tab(tab_id)
+                                    .map(|tab| tab.zoom + step)
+                                    .unwrap_or(1.0);
+                                apply_zoom(&state, factor);
+                            }
                         }
+                        Some("adblock.scan") => {
+                            let classes: Vec<String> = message
+                                .get("classes")
+                                .and_then(Value::as_array)
+                                .map(|items| {
+                                    items
+                                        .iter()
+                                        .filter_map(|item| item.as_str().map(str::to_owned))
+                                        .take(2000)
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            let ids: Vec<String> = message
+                                .get("ids")
+                                .and_then(Value::as_array)
+                                .map(|items| {
+                                    items
+                                        .iter()
+                                        .filter_map(|item| item.as_str().map(str::to_owned))
+                                        .take(1000)
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            if !classes.is_empty() || !ids.is_empty() {
+                                apply_generic_cosmetic_filters(&state, tab_id, &classes, &ids);
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -4102,6 +4832,41 @@ fn main() -> wry::Result<()> {
             }
             Event::UserEvent(AppEvent::Title(tab_id, title)) => {
                 on_title(&state, tab_id, title);
+            }
+            Event::UserEvent(AppEvent::AdblockReady(event)) => {
+                match event {
+                    adblock::AdblockEvent::Status(info) => {
+                        state.borrow_mut().adblock_info = info;
+                    }
+                    adblock::AdblockEvent::Ready { engine, info } => {
+                        let mut state = state.borrow_mut();
+                        state.adblock_engine = Some(*engine);
+                        state.adblock_info = info;
+                    }
+                }
+                let tab_ids: Vec<TabId> = state.borrow().tabs.iter().map(|tab| tab.id).collect();
+                for tab_id in tab_ids {
+                    apply_cosmetic_filters(&state, tab_id);
+                    if let Some(webview) = state
+                        .borrow()
+                        .tab(tab_id)
+                        .and_then(|tab| tab.webview.as_ref())
+                    {
+                        let _ = webview.evaluate_script(
+                            "window.__rustleAdblockRescan && window.__rustleAdblockRescan();",
+                        );
+                    }
+                }
+                push_ui_state(&state);
+            }
+            Event::UserEvent(AppEvent::TileFavicons { request_id, items }) => {
+                let payload = json!({ "ok": true, "items": items });
+                let script = format!(
+                    "window.rustle && window.rustle.dispatch({{\"type\":\"storage.response\",\"id\":{request_id},\"payload\":{payload}}});"
+                );
+                if let Some(chrome) = &state.borrow().chrome {
+                    let _ = chrome.evaluate_script(&script);
+                }
             }
             Event::UserEvent(AppEvent::StorageResponse { request_id, payload }) => {
                 let script = format!(
