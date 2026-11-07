@@ -294,6 +294,14 @@ html.loading #reload .icon-spinner {
   user-select: text;
 }
 
+.address__input:focus,
+.address__input:focus-visible {
+  outline: none;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
 .address__input::selection {
   background: #394457;
 }
