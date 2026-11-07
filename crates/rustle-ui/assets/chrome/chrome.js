@@ -460,7 +460,6 @@
 
     container.classList.toggle("is-editing", tileEdit);
     container.replaceChildren();
-    let draggedUrl = "";
     items.forEach((item) => {
       const tile = document.createElement("div");
       tile.className = "newtab__shortcut" + (tileEdit ? " shortcut--editable" : "");
@@ -515,10 +514,9 @@
       if (tileEdit) {
         tile.draggable = true;
         tile.addEventListener("dragstart", (event) => {
-          draggedUrl = item.url;
-          tile.classList.add("shortcut--dragging");
           event.dataTransfer.effectAllowed = "move";
           event.dataTransfer.setData("text/plain", item.url);
+          tile.classList.add("shortcut--dragging");
         });
         tile.addEventListener("dragover", (event) => {
           event.preventDefault();
@@ -529,11 +527,12 @@
         tile.addEventListener("drop", (event) => {
           event.preventDefault();
           tile.classList.remove("shortcut--drop");
-          if (!draggedUrl || draggedUrl === item.url) {
+          const sourceUrl = event.dataTransfer.getData("text/plain");
+          if (!sourceUrl || sourceUrl === item.url) {
             return;
           }
           const urls = items.map((entry) => entry.url);
-          const from = urls.indexOf(draggedUrl);
+          const from = urls.indexOf(sourceUrl);
           const to = urls.indexOf(item.url);
           if (from < 0 || to < 0) {
             return;
@@ -544,10 +543,9 @@
           renderShortcuts();
         });
         tile.addEventListener("dragend", () => {
-          draggedUrl = "";
-          container.querySelectorAll(".shortcut--dragging, .shortcut--drop").forEach((node) => {
-            node.classList.remove("shortcut--dragging", "shortcut--drop");
-          });
+          container
+            .querySelectorAll(".shortcut--dragging, .shortcut--drop")
+            .forEach((node) => node.classList.remove("shortcut--dragging", "shortcut--drop"));
         });
       }
 
