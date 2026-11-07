@@ -109,6 +109,16 @@ pub struct SessionTab {
     pub url: String,
     #[serde(default)]
     pub title: String,
+    #[serde(default)]
+    pub group: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionGroup {
+    pub id: u64,
+    pub name: String,
+    #[serde(default)]
+    pub collapsed: bool,
 }
 
 /// Browser session file.
@@ -123,6 +133,8 @@ pub struct Session {
     pub tabs: Vec<SessionTab>,
     #[serde(default)]
     pub closed: Vec<SessionTab>,
+    #[serde(default)]
+    pub groups: Vec<SessionGroup>,
 }
 
 impl Default for Session {
@@ -133,6 +145,7 @@ impl Default for Session {
             active: 0,
             tabs: Vec::new(),
             closed: Vec::new(),
+            groups: Vec::new(),
         }
     }
 }

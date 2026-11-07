@@ -21,7 +21,7 @@ use std::{
 
 use rustle_core::{ErrorInfo, TabId, VERSION, display_url, resolve_input, search_url};
 use rustle_storage::{
-    BookmarkEntry, DownloadRecord, SESSION_VERSION, Session, SessionTab, Settings,
+    BookmarkEntry, DownloadRecord, SESSION_VERSION, Session, SessionGroup, SessionTab, Settings,
 };
 use rustle_ui::{CSP, asset, mime_type};
 use serde_json::{Value, json};
@@ -102,6 +102,11 @@ enum AppEvent {
     FetchFavicons,
     FaviconFetched(TabId, String, Vec<u8>),
     Vertical(bool),
+    CreateGroup { name: String, tab: Option<TabId> },
+    ToggleGroup(u64),
+    RemoveGroup(u64),
+    NewTabInGroup(u64),
+    MoveTabGroup { tab: TabId, group: Option<u64> },
     LayoutTick,
     Focus,
     NewTab,
@@ -126,6 +131,14 @@ struct Tab {
     return_url: Option<String>,
     favicon: Option<String>,
     zoom: f64,
+    group: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct TabGroup {
+    id: u64,
+    name: String,
+    collapsed: bool,
 }
 
 impl Tab {
@@ -143,6 +156,7 @@ impl Tab {
             return_url: None,
             favicon: None,
             zoom: 1.0,
+            group: None,
         }
     }
 }
@@ -193,6 +207,8 @@ struct AppState {
     vertical: bool,
     sidebar_collapsed: bool,
     layout_anim: Option<LayoutAnimation>,
+    groups: Vec<TabGroup>,
+    next_group_id: u64,
 }
 
 struct LayoutAnimation {
@@ -240,6 +256,8 @@ impl AppState {
             vertical: false,
             sidebar_collapsed: false,
             layout_anim: None,
+            groups: Vec::new(),
+            next_group_id: 1,
         }
     }
 
@@ -437,6 +455,7 @@ fn save_session_state(state: &Rc<RefCell<AppState>>, clean_exit: bool) {
                 .map(|tab| SessionTab {
                     url: session_url(&tab.url),
                     title: tab.title.clone(),
+                    group: tab.group,
                 })
                 .collect(),
             closed: state
@@ -445,6 +464,16 @@ fn save_session_state(state: &Rc<RefCell<AppState>>, clean_exit: bool) {
                 .map(|tab| SessionTab {
                     url: session_url(&tab.url),
                     title: tab.title.clone(),
+                    group: None,
+                })
+                .collect(),
+            groups: state
+                .groups
+                .iter()
+                .map(|group| SessionGroup {
+                    id: group.id,
+                    name: group.name.clone(),
+                    collapsed: group.collapsed,
                 })
                 .collect(),
         }
@@ -468,6 +497,17 @@ fn restore_session(state: &Rc<RefCell<AppState>>, session: Option<Session>) {
     let session = session.unwrap_or_default();
 
     let closed = session.closed;
+    state.groups = session
+        .groups
+        .into_iter()
+        .filter(|group| !group.name.trim().is_empty())
+        .map(|group| TabGroup {
+            id: group.id,
+            name: group.name,
+            collapsed: group.collapsed,
+        })
+        .collect();
+    state.next_group_id = state.groups.iter().map(|g| g.id).max().unwrap_or(0) + 1;
     if session.tabs.is_empty() {
         let id = push_tab(
             &mut state,
@@ -477,6 +517,9 @@ fn restore_session(state: &Rc<RefCell<AppState>>, session: Option<Session>) {
         state.active = id;
     } else {
         for tab in session.tabs {
+            let group = tab
+                .group
+                .filter(|id| state.groups.iter().any(|group| group.id == *id));
             let url = canonicalize_internal(if tab.url.is_empty() {
                 NEWTAB_URL.to_owned()
             } else {
@@ -486,10 +529,27 @@ fn restore_session(state: &Rc<RefCell<AppState>>, session: Option<Session>) {
             let id = push_tab(&mut state, url, tab.title);
             if let Some(tab) = state.tab_mut(id) {
                 tab.favicon = favicon;
+                tab.group = group;
             }
         }
         let active_index = session.active.min(state.tabs.len().saturating_sub(1));
         state.active = state.tabs[active_index].id;
+        let active_collapsed = state
+            .tab(state.active)
+            .and_then(|tab| tab.group)
+            .and_then(|id| state.groups.iter().find(|group| group.id == id))
+            .is_some_and(|group| group.collapsed);
+        if active_collapsed {
+            if let Some(visible) = state.tabs.iter().find(|tab| {
+                tab.group
+                    .and_then(|id| state.groups.iter().find(|group| group.id == id))
+                    .is_none_or(|group| !group.collapsed)
+            }) {
+                state.active = visible.id;
+            } else if let Some(group) = state.groups.iter_mut().find(|group| group.collapsed) {
+                group.collapsed = false;
+            }
+        }
     }
     state.closed = closed
         .into_iter()
@@ -521,6 +581,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                     "faviconData": tab.favicon.as_deref().and_then(favicon_data),
                     "loading": tab.loading,
                     "active": tab.id == state.active,
+                      "groupId": tab.group,
                     "error": tab.error.clone(),
                 })
             })
@@ -583,6 +644,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
             "zoom": active.map(|tab| tab.zoom).unwrap_or(1.0),
             "vertical": state.vertical,
             "sidebarCollapsed": state.sidebar_collapsed,
+            "groups": state.groups.iter().map(|group| json!({"id": group.id, "name": group.name, "collapsed": group.collapsed})).collect::<Vec<_>>(),
             "secure": url.starts_with("https://"),
             "bookmarks": state.bookmarks,
             "settings": {
@@ -1684,6 +1746,157 @@ fn new_tab(state: &Rc<RefCell<AppState>>) {
     };
     activate_tab(state, id);
     focus_address(state);
+}
+
+fn tab_group_collapsed(groups: &[TabGroup], group: Option<u64>) -> bool {
+    group
+        .and_then(|id| groups.iter().find(|entry| entry.id == id))
+        .is_some_and(|entry| entry.collapsed)
+}
+
+fn create_group(state: &Rc<RefCell<AppState>>, name: String, tab: Option<TabId>) {
+    {
+        let mut state = state.borrow_mut();
+        let id = state.next_group_id;
+        state.next_group_id += 1;
+        state.groups.push(TabGroup {
+            id,
+            name: if name.trim().is_empty() {
+                "Группа".to_owned()
+            } else {
+                name.trim().to_owned()
+            },
+            collapsed: false,
+        });
+        if let Some(tab_id) = tab {
+            if let Some(tab) = state.tab_mut(tab_id) {
+                tab.group = Some(id);
+            }
+        }
+    }
+    push_ui_state(state);
+    save_session_due(state);
+}
+
+fn toggle_group(state: &Rc<RefCell<AppState>>, group_id: u64) {
+    let (collapsed, active_inside) = {
+        let state = state.borrow();
+        let Some(group) = state.groups.iter().find(|entry| entry.id == group_id) else {
+            return;
+        };
+        (
+            !group.collapsed,
+            state
+                .active_tab()
+                .is_some_and(|tab| tab.group == Some(group_id)),
+        )
+    };
+    if collapsed && active_inside {
+        let fallback = {
+            let state = state.borrow();
+            state
+                .tabs
+                .iter()
+                .find(|tab| {
+                    tab.group != Some(group_id) && !tab_group_collapsed(&state.groups, tab.group)
+                })
+                .map(|tab| tab.id)
+        };
+        let Some(fallback) = fallback else {
+            return;
+        };
+        activate_tab(state, fallback);
+    }
+    let mut detached = Vec::new();
+    {
+        let mut state = state.borrow_mut();
+        if let Some(group) = state.groups.iter_mut().find(|entry| entry.id == group_id) {
+            group.collapsed = collapsed;
+        }
+        if collapsed {
+            for tab in state
+                .tabs
+                .iter_mut()
+                .filter(|tab| tab.group == Some(group_id))
+            {
+                if let Some(webview) = tab.webview.take() {
+                    detached.push(webview);
+                }
+                tab.loading = false;
+            }
+        }
+    }
+    drop(detached);
+    push_ui_state(state);
+    save_session_due(state);
+}
+
+fn remove_group(state: &Rc<RefCell<AppState>>, group_id: u64) {
+    let tab_ids: Vec<TabId> = {
+        let state = state.borrow();
+        state
+            .tabs
+            .iter()
+            .filter(|tab| tab.group == Some(group_id))
+            .map(|tab| tab.id)
+            .collect()
+    };
+    {
+        let mut state = state.borrow_mut();
+        state.groups.retain(|group| group.id != group_id);
+    }
+    for tab_id in tab_ids {
+        close_tab(state, tab_id);
+    }
+    push_ui_state(state);
+    save_session_due(state);
+}
+
+fn new_tab_in_group(state: &Rc<RefCell<AppState>>, group_id: u64) {
+    let id = {
+        let mut state = state.borrow_mut();
+        if !state.groups.iter().any(|group| group.id == group_id) {
+            return;
+        }
+        if let Some(group) = state.groups.iter_mut().find(|group| group.id == group_id) {
+            group.collapsed = false;
+        }
+        let id = push_tab(
+            &mut state,
+            NEWTAB_URL.to_owned(),
+            "Новая вкладка".to_owned(),
+        );
+        if let Some(tab) = state.tab_mut(id) {
+            tab.group = Some(group_id);
+        }
+        id
+    };
+    activate_tab(state, id);
+    focus_address(state);
+}
+
+fn move_tab_to_group(state: &Rc<RefCell<AppState>>, tab_id: TabId, group_id: Option<u64>) {
+    let changed = {
+        let mut state = state.borrow_mut();
+        if let Some(group_id) = group_id {
+            if !state.groups.iter().any(|group| group.id == group_id) {
+                return;
+            }
+            if let Some(group) = state.groups.iter_mut().find(|group| group.id == group_id) {
+                group.collapsed = false;
+            }
+        }
+        if let Some(tab) = state.tab_mut(tab_id) {
+            tab.group = group_id;
+            true
+        } else {
+            false
+        }
+    };
+    if changed {
+        push_ui_state(state);
+        save_session_due(state);
+    }
 }
 
 fn open_external_url(state: &Rc<RefCell<AppState>>, input: &str) {
@@ -3012,6 +3225,45 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                     .send_event(AppEvent::Activate(TabId(id)));
             }
         }
+        Some("groups.create") => {
+            let name = message
+                .get("name")
+                .and_then(|value| value.as_str())
+                .unwrap_or("Группа")
+                .to_owned();
+            let tab = message
+                .get("tabId")
+                .and_then(|value| value.as_u64())
+                .map(TabId);
+            let _ = state
+                .borrow()
+                .proxy
+                .send_event(AppEvent::CreateGroup { name, tab });
+        }
+        Some("groups.toggle") => {
+            if let Some(id) = message.get("groupId").and_then(|value| value.as_u64()) {
+                let _ = state.borrow().proxy.send_event(AppEvent::ToggleGroup(id));
+            }
+        }
+        Some("groups.remove") => {
+            if let Some(id) = message.get("groupId").and_then(|value| value.as_u64()) {
+                let _ = state.borrow().proxy.send_event(AppEvent::RemoveGroup(id));
+            }
+        }
+        Some("groups.newTab") => {
+            if let Some(id) = message.get("groupId").and_then(|value| value.as_u64()) {
+                let _ = state.borrow().proxy.send_event(AppEvent::NewTabInGroup(id));
+            }
+        }
+        Some("tabs.moveGroup") => {
+            if let Some(tab) = message.get("id").and_then(|value| value.as_u64()) {
+                let group = message.get("groupId").and_then(|value| value.as_u64());
+                let _ = state.borrow().proxy.send_event(AppEvent::MoveTabGroup {
+                    tab: TabId(tab),
+                    group,
+                });
+            }
+        }
         Some("history.query") => {
             if let Some(request_id) = message.get("id").and_then(|value| value.as_u64()) {
                 let query = message
@@ -3762,6 +4014,21 @@ fn main() -> wry::Result<()> {
                 if changed {
                     push_ui_state(&state);
                 }
+            }
+            Event::UserEvent(AppEvent::CreateGroup { name, tab }) => {
+                create_group(&state, name, tab);
+            }
+            Event::UserEvent(AppEvent::ToggleGroup(group_id)) => {
+                toggle_group(&state, group_id);
+            }
+            Event::UserEvent(AppEvent::RemoveGroup(group_id)) => {
+                remove_group(&state, group_id);
+            }
+            Event::UserEvent(AppEvent::NewTabInGroup(group_id)) => {
+                new_tab_in_group(&state, group_id);
+            }
+            Event::UserEvent(AppEvent::MoveTabGroup { tab, group }) => {
+                move_tab_to_group(&state, tab, group);
             }
             Event::UserEvent(AppEvent::Vertical(enabled)) => {
                 state.borrow_mut().layout_anim = None;

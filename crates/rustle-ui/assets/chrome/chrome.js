@@ -779,6 +779,16 @@
     address.classList.toggle("address__input--full", full && Boolean(value));
   };
 
+  const syncAddressOverlay = () => {
+    const box = document.querySelector(".address");
+    if (!box) {
+      return;
+    }
+    const rect = box.getBoundingClientRect();
+    document.documentElement.style.setProperty("--suggest-left", rect.left + "px");
+    document.documentElement.style.setProperty("--suggest-width", rect.width + "px");
+  };
+
   const applyState = (payload) => {
     if (!payload || typeof payload !== "object") {
       return;
@@ -848,6 +858,9 @@
       payload.vertical ? (payload.sidebarCollapsed ? "56px" : "282px") : "0px",
     );
     document.documentElement.style.setProperty("--chrome-offset", payload.vertical ? "44px" : "78px");
+    const sideWidth = payload.vertical ? (payload.sidebarCollapsed ? 56 : 282) : 0;
+    document.documentElement.style.setProperty("--toolbar-nav-left", Math.max(72, sideWidth) + "px");
+    window.requestAnimationFrame(syncAddressOverlay);
     if (Array.isArray(payload.bookmarks)) {
       current.bookmarks = payload.bookmarks;
       renderShortcuts();
@@ -886,6 +899,8 @@
 
     document.title = title;
   };
+
+  window.addEventListener("resize", syncAddressOverlay);
 
   window.rustle = {
     dispatch(message) {

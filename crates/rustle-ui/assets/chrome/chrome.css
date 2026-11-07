@@ -206,11 +206,12 @@ input:focus-visible,
 }
 
 .toolbar {
+  position: relative;
   height: 44px;
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 8px;
+  padding: 0 8px 0 var(--toolbar-nav-left, 72px);
   background: var(--bg-elevated);
 }
 
@@ -922,9 +923,10 @@ html[data-theme="light"] .newtab__mark {
 }
 .suggestions {
   position: absolute;
-  top: var(--chrome-offset, 78px);
-  left: 8px;
-  right: 8px;
+  top: 44px;
+  left: var(--suggest-left, 8px);
+  width: var(--suggest-width, auto);
+  right: auto;
   z-index: 5;
   display: flex;
   flex-direction: column;
@@ -1074,13 +1076,16 @@ html.private-mode .build-badge {
 }
 
 .window-controls {
+  position: absolute;
+  left: 8px;
+  top: 0;
+  height: 44px;
   display: flex;
   align-items: center;
-  align-self: stretch;
   gap: 8px;
-  margin-right: 6px;
   padding: 0 8px 0 2px;
   cursor: default;
+  z-index: 2;
 }
 
 .window-control {
