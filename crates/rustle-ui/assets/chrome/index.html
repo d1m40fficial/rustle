@@ -12,6 +12,11 @@
     <button class="tab-new" type="button" id="new-tab" title="Новая вкладка (Ctrl+T)" aria-label="Новая вкладка">+</button>
     <span class="tabs__spacer"></span>
     <span class="build-badge" id="about" title="Версия">0.1.0</span>
+    <div class="window-controls">
+      <button class="window-control" id="win-min" type="button" title="Свернуть" aria-label="Свернуть">&#x2013;</button>
+      <button class="window-control" id="win-max" type="button" title="Развернуть" aria-label="Развернуть">&#x25A1;</button>
+      <button class="window-control window-control--close" id="win-close" type="button" title="Закрыть" aria-label="Закрыть">&#x2715;</button>
+    </div>
   </div>
 
   <div class="toolbar" role="toolbar" aria-label="Навигация">
@@ -23,7 +28,7 @@
     </button>
     <button class="chrome-btn" type="button" id="reload" data-cmd="nav.reload" title="Обновить (F5)" aria-label="Обновить">
       <svg class="icon-reload" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20 4v7h-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <svg class="icon-stop" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <svg class="icon-spinner" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2" opacity="0.25"/><path d="M20 12a8 8 0 0 0-8-8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     </button>
 
     <div class="address">
@@ -33,6 +38,7 @@
       <input id="address" class="address__input" type="text" value="rustle://newtab" spellcheck="false" autocomplete="off" aria-label="Адресная строка">
     </div>
 
+    <button class="chrome-btn" type="button" id="translate-page" title="Перевести страницу" aria-label="Перевести страницу"><span class="translate-icon">A文</span></button>
     <button class="chrome-btn" type="button" id="bookmark-current" title="Добавить в закладки" aria-label="Добавить в закладки">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.8 1-6.1-4.4-4.3 6.1-.9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
     </button>
@@ -46,7 +52,11 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v17l-6-4-6 4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
     </button>
     <button class="chrome-btn" type="button" data-nav="rustle://settings" title="Настройки" aria-label="Настройки">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="7" r="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="17" r="2" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+    </button>
+    <span class="zoom-label" id="zoom-label" title="Масштаб — сбросить" role="button" tabindex="0">100%</span>
+    <button class="chrome-btn" type="button" id="vertical-toggle" title="Вертикальные вкладки" aria-label="Вертикальные вкладки">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="6" height="16" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M13 6h8M13 12h8M13 18h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     </button>
     <button class="chrome-btn" type="button" data-nav="rustle://downloads" title="Загрузки" aria-label="Загрузки">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -61,8 +71,6 @@
     <button id="find-next" class="find-bar__button" type="button" title="Следующее">↓</button>
     <button id="find-close" class="find-bar__button" type="button" title="Закрыть">×</button>
   </div>
-
-  <div class="progress" id="progress" aria-hidden="true"></div>
 
   <div class="suggestions" id="suggestions" hidden></div>
 
@@ -89,20 +97,8 @@
         <button class="newtab__go" type="submit" aria-label="Найти">→</button>
       </form>
 
-      <div class="newtab__shortcuts">
-        <button class="newtab__shortcut" type="button" data-url="https://github.com/d1m40fficial/rustle">
-          <span class="newtab__mark">GH</span>
-          <span>GitHub</span>
-        </button>
-        <button class="newtab__shortcut" type="button" data-url="https://www.youtube.com">
-          <span class="newtab__mark">YT</span>
-          <span>YouTube</span>
-        </button>
-        <button class="newtab__shortcut" type="button" data-url="https://ru.wikipedia.org">
-          <span class="newtab__mark">W</span>
-          <span>Википедия</span>
-        </button>
-      </div>
+      <div class="newtab__shortcuts" id="newtab-shortcuts"></div>
+      <button class="newtab__add" id="newtab-add" type="button">+ Добавить сайт</button>
 
       <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают.</p>
     </div>
@@ -200,6 +196,13 @@
           <small>Пробовать HTTPS для HTTP-адресов, кроме localhost.</small>
         </span>
         <input id="setting-https" type="checkbox">
+      </label>
+      <label class="settings__row">
+        <span>
+          <strong>Блокировка рекламы</strong>
+          <small>Базовый сетевой фильтр рекламных доменов.</small>
+        </span>
+        <input id="setting-adblock" type="checkbox">
       </label>
       <label class="settings__row">
         <span>

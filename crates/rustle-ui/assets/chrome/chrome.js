@@ -325,6 +325,76 @@
     }
   };
 
+  const DEFAULT_SHORTCUTS = [
+    { url: "https://github.com/d1m40fficial/rustle", title: "GitHub", mark: "GH" },
+    { url: "https://www.youtube.com", title: "YouTube", mark: "YT" },
+    { url: "https://ru.wikipedia.org", title: "Википедия", mark: "W" },
+  ];
+
+  const shortcutsKey = "rustle.shortcuts.v1";
+
+  const readShortcuts = () => {
+    try {
+      const raw = localStorage.getItem(shortcutsKey);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed) && parsed.length) {
+        return parsed;
+      }
+    } catch {
+      // ignore malformed storage
+    }
+    return DEFAULT_SHORTCUTS;
+  };
+
+  const saveShortcuts = (items) => {
+    try {
+      localStorage.setItem(shortcutsKey, JSON.stringify(items));
+    } catch {
+      // localStorage may be disabled; tiles still work for this session
+    }
+  };
+
+  const renderShortcuts = () => {
+    const container = byId("newtab-shortcuts");
+    if (!container) {
+      return;
+    }
+    const items = readShortcuts();
+    container.replaceChildren();
+    items.forEach((item, index) => {
+      const tile = document.createElement("div");
+      tile.className = "newtab__shortcut";
+      tile.tabIndex = 0;
+      tile.setAttribute("role", "button");
+      const mark = document.createElement("span");
+      mark.className = "newtab__mark";
+      mark.textContent = item.mark || (item.title || item.url).slice(0, 2).toUpperCase();
+      const label = document.createElement("span");
+      label.textContent = item.title || item.url;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "shortcut__remove";
+      remove.title = "Удалить плитку";
+      remove.setAttribute("aria-label", "Удалить плитку");
+      remove.textContent = "×";
+      remove.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const next = readShortcuts().filter((_, i) => i !== index);
+        saveShortcuts(next);
+        renderShortcuts();
+      });
+      tile.append(mark, label, remove);
+      tile.addEventListener("click", () => send({ type: "nav.go", url: item.url }));
+      tile.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          send({ type: "nav.go", url: item.url });
+        }
+      });
+      container.append(tile);
+    });
+  };
+
   const formatBytes = (bytes) => {
     if (!bytes) {
       return "";
@@ -433,6 +503,10 @@
     if (clearExit) {
       clearExit.checked = Boolean(settings.clearOnExit);
     }
+    const adblock = byId("setting-adblock");
+    if (adblock) {
+      adblock.checked = settings.adblock !== false;
+    }
     const status = byId("settings-status");
     if (status) {
       status.textContent = "";
@@ -526,6 +600,38 @@
     });
   };
 
+  const addressFullValue = () =>
+    current.url || current.displayUrl || "";
+
+  const addressDomainValue = () => {
+    if (current.mode === "newtab") {
+      return "";
+    }
+    const raw = current.url || current.displayUrl || "";
+    if (!raw || raw.startsWith("rustle://")) {
+      return current.displayUrl || raw;
+    }
+    try {
+      return new URL(raw).hostname.replace(/^www\./, "");
+    } catch {
+      return raw;
+    }
+  };
+
+  const renderAddress = (forceFull = false) => {
+    const address = byId("address");
+    if (!address) {
+      return;
+    }
+    const focused = document.activeElement === address;
+    const full = forceFull || focused;
+    const value = current.mode === "newtab" ? "" : full ? addressFullValue() : addressDomainValue();
+    address.value = value;
+    address.placeholder = current.mode === "newtab" ? "Поиск или адрес" : "";
+    address.classList.toggle("address__input--domain", !full && Boolean(value));
+    address.classList.toggle("address__input--full", full && Boolean(value));
+  };
+
   const applyState = (payload) => {
     if (!payload || typeof payload !== "object") {
       return;
@@ -557,7 +663,14 @@
     const title = payload.title || "Rustle";
     const address = byId("address");
     if (document.activeElement !== address || activeChanged) {
-      address.value = payload.displayUrl || payload.url || "";
+      renderAddress(false);
+    } else {
+      renderAddress(true);
+    }
+    const zoom = Number(payload.zoom);
+    const zoomLabel = byId("zoom-label");
+    if (zoomLabel && Number.isFinite(zoom)) {
+      zoomLabel.textContent = Math.round(zoom * 100) + "%";
     }
 
     const secure = Boolean(payload.secure);
@@ -581,6 +694,8 @@
     document.documentElement.classList.toggle("newtab-mode", newtab);
     document.documentElement.classList.toggle("internal-mode", internal);
     document.documentElement.classList.toggle("error-mode", Boolean(error));
+    document.documentElement.classList.toggle("vertical-mode", Boolean(payload.vertical));
+    document.documentElement.classList.toggle("overlay-mode", mode !== "web");
 
     if (internal) {
       const page = payload.internalPage || "";
@@ -651,8 +766,9 @@
   const init = () => {
     const address = byId("address");
 
-    address.addEventListener("focus", () => address.select());
-    address.addEventListener("click", () => address.select());
+    address.addEventListener("focus", () => { renderAddress(true); address.select(); });
+    address.addEventListener("click", () => { renderAddress(true); address.select(); });
+    address.addEventListener("blur", () => renderAddress(false));
     address.addEventListener("keydown", (event) => {
       const panel = byId("suggestions");
       const open = panel && !panel.hidden;
@@ -678,13 +794,15 @@
         send({ type: "nav.go", url });
       } else if (event.key === "Escape") {
         closeSuggestions();
-        address.value = current.displayUrl || current.url || "";
+        renderAddress(true);
         address.blur();
       }
     });
 
     let suggestTimer = 0;
     address.addEventListener("input", () => {
+      address.classList.remove("address__input--domain");
+      address.classList.add("address__input--full");
       clearTimeout(suggestTimer);
       const query = address.value.trim();
       if (query.length < 2 || query.startsWith("rustle://")) {
@@ -797,11 +915,29 @@
       });
     }
 
-    document.querySelectorAll("[data-url]").forEach((button) => {
-      button.addEventListener("click", () => {
-        send({ type: "nav.go", url: button.dataset.url });
+    renderShortcuts();
+    const addShortcut = byId("newtab-add");
+    if (addShortcut) {
+      addShortcut.addEventListener("click", () => {
+        const raw = window.prompt("Адрес сайта", "https://");
+        if (!raw) {
+          return;
+        }
+        let url = raw.trim();
+        if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) {
+          url = "https://" + url;
+        }
+        const title = window.prompt("Название плитки", url) || url;
+        const items = readShortcuts();
+        items.push({
+          url,
+          title,
+          mark: title.slice(0, 2).toUpperCase(),
+        });
+        saveShortcuts(items);
+        renderShortcuts();
       });
-    });
+    }
 
     const importBookmarks = byId("bookmarks-import");
     if (importBookmarks) {
@@ -851,6 +987,7 @@
           startup: byId("setting-startup").value,
           httpsFirst: byId("setting-https").checked,
           clearOnExit: byId("setting-clear-exit").checked,
+          adblock: byId("setting-adblock").checked,
         });
         byId("settings-status").textContent = "Сохранено";
       });
@@ -899,6 +1036,60 @@
     const errorBack = byId("error-back");
     if (errorBack) {
       errorBack.addEventListener("click", () => send({ type: "nav.back" }));
+    }
+
+    const verticalToggle = byId("vertical-toggle");
+    if (verticalToggle) {
+      verticalToggle.addEventListener("click", () => {
+        send({ type: "ui.vertical", enabled: !current.vertical });
+      });
+    }
+
+    const minimize = byId("win-min");
+    if (minimize) {
+      minimize.addEventListener("click", () => send({ type: "window.min" }));
+    }
+    const maximize = byId("win-max");
+    if (maximize) {
+      maximize.addEventListener("click", () => send({ type: "window.max" }));
+    }
+    const closeWindow = byId("win-close");
+    if (closeWindow) {
+      closeWindow.addEventListener("click", () => send({ type: "window.close" }));
+    }
+    const spacer = document.querySelector(".tabs__spacer");
+    if (spacer) {
+      spacer.addEventListener("mousedown", (event) => {
+        if (event.button === 0) {
+          send({ type: "window.drag" });
+        }
+      });
+      spacer.addEventListener("dblclick", () => send({ type: "window.max" }));
+    }
+
+    const zoomLabel = byId("zoom-label");
+    if (zoomLabel) {
+      const reset = () => send({ type: "zoom.reset" });
+      zoomLabel.addEventListener("click", reset);
+      zoomLabel.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          reset();
+        }
+      });
+    }
+
+    const translate = byId("translate-page");
+    if (translate) {
+      translate.addEventListener("click", () => {
+        if (!current.url || !/^https?:\/\//.test(current.url)) {
+          return;
+        }
+        const target =
+          "https://translate.google.com/translate?sl=auto&tl=ru&u=" +
+          encodeURIComponent(current.url);
+        send({ type: "tabs.newUrl", url: target });
+      });
     }
 
     send({ type: "chrome.ready" });

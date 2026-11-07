@@ -63,6 +63,8 @@ pub struct Settings {
     pub https_first: bool,
     #[serde(default)]
     pub clear_on_exit: bool,
+    #[serde(default = "default_true")]
+    pub adblock: bool,
 }
 
 fn default_search_engine() -> String {
@@ -77,6 +79,10 @@ fn default_startup() -> String {
     "restore".to_owned()
 }
 
+fn default_true() -> bool {
+    true
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -86,6 +92,7 @@ impl Default for Settings {
             startup: default_startup(),
             https_first: false,
             clear_on_exit: false,
+            adblock: true,
         }
     }
 }

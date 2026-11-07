@@ -1,4 +1,6 @@
-//! Rustle M2.1: tabs, session restore, new-tab overlay and single instance.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+//! Rustle desktop browser.
 
 mod single_instance;
 mod storage_worker;
@@ -37,6 +39,8 @@ use wry::{
 };
 
 #[cfg(target_os = "windows")]
+use tao::platform::windows::WindowExtWindows;
+#[cfg(target_os = "windows")]
 use wry::{WebViewBuilderExtWindows, WebViewExtWindows};
 
 #[cfg(target_os = "windows")]
@@ -49,7 +53,7 @@ use webview2_com::{
         ICoreWebView2_4, ICoreWebView2_13, ICoreWebView2_15, ICoreWebView2DownloadOperation,
         ICoreWebView2Profile2,
     },
-    StateChangedEventHandler,
+    StateChangedEventHandler, WebResourceRequestedEventHandler, ZoomFactorChangedEventHandler,
 };
 #[cfg(target_os = "windows")]
 use webview2_com::{
@@ -59,7 +63,7 @@ use webview2_com::{
         COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION, COREWEBVIEW2_PERMISSION_KIND_MICROPHONE,
         COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS, COREWEBVIEW2_PERMISSION_KIND_OTHER_SENSORS,
         COREWEBVIEW2_PERMISSION_KIND_UNKNOWN_PERMISSION, COREWEBVIEW2_PERMISSION_STATE_ALLOW,
-        COREWEBVIEW2_PERMISSION_STATE_DENY,
+        COREWEBVIEW2_PERMISSION_STATE_DENY, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
     },
     PermissionRequestedEventHandler, ProcessFailedEventHandler,
 };
@@ -70,6 +74,7 @@ use windows_core::{Interface, PCWSTR};
 const CHROME_COLLAPSED: u32 = 78;
 const CHROME_URL: &str = "rustle://localhost/chrome/index.html";
 const NEWTAB_URL: &str = "rustle://localhost/newtab/index.html";
+const SIDEBAR_URL: &str = "rustle://localhost/sidebar/index.html";
 const MAX_IPC_BYTES: usize = 64 * 1024;
 const MAX_CLOSED_TABS: usize = 25;
 
@@ -87,6 +92,7 @@ enum AppEvent {
     DownloadsChanged,
     DownloadsRestored(Vec<DownloadRecord>),
     BookmarksRestored(Vec<BookmarkEntry>),
+    Vertical(bool),
     Focus,
     NewTab,
     Activate(TabId),
@@ -173,6 +179,9 @@ struct AppState {
     downloads: Vec<DownloadEntry>,
     next_download_id: u64,
     private: bool,
+    sidebar: Option<WebView>,
+    vertical: bool,
+    sidebar_collapsed: bool,
 }
 
 impl AppState {
@@ -208,6 +217,9 @@ impl AppState {
             downloads: Vec::new(),
             next_download_id: 1,
             private: false,
+            sidebar: None,
+            vertical: false,
+            sidebar_collapsed: false,
         }
     }
 
@@ -547,6 +559,9 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
             "internalPage": internal_page_name,
             "theme": if state.settings.theme == "light" { "light" } else { "dark" },
             "private": state.private,
+            "zoom": active.map(|tab| tab.zoom).unwrap_or(1.0),
+            "vertical": state.vertical,
+            "sidebarCollapsed": state.sidebar_collapsed,
             "secure": url.starts_with("https://"),
             "bookmarks": state.bookmarks,
             "settings": {
@@ -555,6 +570,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                 "startup": state.settings.startup,
                 "httpsFirst": state.settings.https_first,
                 "clearOnExit": state.settings.clear_on_exit,
+                "adblock": state.settings.adblock,
             },
             "downloads": downloads_payload(&state),
         });
@@ -583,6 +599,9 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
         if let Err(error) = chrome.evaluate_script(&script) {
             eprintln!("[ui] state push failed: {error}");
         }
+    }
+    if let Some(sidebar) = &state_ref.sidebar {
+        let _ = sidebar.evaluate_script(&script);
     }
 }
 
@@ -689,7 +708,18 @@ fn raise_chrome(state: &Rc<RefCell<AppState>>) {
 }
 
 fn apply_layout(state: &Rc<RefCell<AppState>>) {
-    let (width, height, active, overlay_mode, dropdown_open, dropdown_height, bookmark_bar) = {
+    let (
+        width,
+        height,
+        active,
+        overlay_mode,
+        dropdown_open,
+        dropdown_height,
+        bookmark_bar,
+        find_open,
+        vertical,
+        sidebar_collapsed,
+    ) = {
         let state = state.borrow();
         let overlay_mode = state.active_tab().is_some_and(|tab| {
             tab.error.is_some() || newtab_overlay(&state) || internal_page(&tab.url).is_some()
@@ -702,9 +732,11 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             state.dropdown_open,
             state.dropdown_height,
             state.bookmark_bar,
+            state.find_open,
+            state.vertical,
+            state.sidebar_collapsed,
         )
     };
-    let find_open = state.borrow().find_open;
 
     let collapsed = if bookmark_bar {
         CHROME_COLLAPSED + 30
@@ -720,11 +752,28 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
     } else {
         collapsed
     };
+    let sidebar_width = if vertical && !overlay_mode {
+        if sidebar_collapsed { 48 } else { 220 }
+    } else {
+        0
+    };
+    let content_width = width.saturating_sub(sidebar_width);
 
     {
         let state = state.borrow();
         if let Some(chrome) = &state.chrome {
             let _ = chrome.set_bounds(rect(0, 0, width, chrome_height));
+        }
+        if let Some(sidebar) = &state.sidebar {
+            let _ = sidebar.set_visible(vertical && !overlay_mode);
+            if vertical && !overlay_mode {
+                let _ = sidebar.set_bounds(rect(
+                    0,
+                    collapsed,
+                    sidebar_width,
+                    height.saturating_sub(collapsed),
+                ));
+            }
         }
 
         for tab in &state.tabs {
@@ -735,8 +784,12 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
                 let _ = webview.set_visible(false);
             } else if tab.id == active {
                 let _ = webview.set_visible(true);
-                let _ =
-                    webview.set_bounds(rect(0, collapsed, width, height.saturating_sub(collapsed)));
+                let _ = webview.set_bounds(rect(
+                    sidebar_width,
+                    collapsed,
+                    content_width,
+                    height.saturating_sub(collapsed),
+                ));
             } else {
                 let _ = webview.set_visible(false);
             }
@@ -949,6 +1002,8 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
             install_download_handler(state, webview, tab_id);
             install_permission_handler(state, webview);
             install_crash_handler(state, webview, tab_id);
+            install_zoom_handler(state, webview, tab_id);
+            install_adblock_handler(state, webview);
             if !state.borrow().private {
                 install_favicon_handler(state, webview, tab_id);
             }
@@ -1596,6 +1651,10 @@ fn handle_shortcut(
     } else if ctrl && virtual_key == 0x30 {
         apply_zoom(state, 1.0);
         true
+    } else if virtual_key == 0x78 {
+        let enabled = !state.borrow().vertical;
+        let _ = state.borrow().proxy.send_event(AppEvent::Vertical(enabled));
+        true
     } else if virtual_key == 0x7A {
         let window = state.borrow().window.clone();
         if window.fullscreen().is_some() {
@@ -2213,17 +2272,20 @@ fn export_bookmarks_file(state: &Rc<RefCell<AppState>>, request_id: u64, items: 
 #[cfg(target_os = "windows")]
 fn apply_zoom(state: &Rc<RefCell<AppState>>, factor: f64) {
     let factor = factor.clamp(0.5, 3.0);
-    let mut state = state.borrow_mut();
-    let active = state.active;
-    let Some(tab) = state.tab_mut(active) else {
-        return;
-    };
-    tab.zoom = factor;
-    if let Some(webview) = &tab.webview {
-        unsafe {
-            let _ = webview.controller().SetZoomFactor(factor);
+    {
+        let mut state_ref = state.borrow_mut();
+        let active = state_ref.active;
+        let Some(tab) = state_ref.tab_mut(active) else {
+            return;
+        };
+        tab.zoom = factor;
+        if let Some(webview) = &tab.webview {
+            unsafe {
+                let _ = webview.controller().SetZoomFactor(factor);
+            }
         }
     }
+    push_ui_state(state);
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -2397,6 +2459,102 @@ fn install_crash_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, tab_i
 fn install_permission_handler(_state: &Rc<RefCell<AppState>>, _webview: &WebView) {}
 #[cfg(not(target_os = "windows"))]
 fn install_crash_handler(_state: &Rc<RefCell<AppState>>, _webview: &WebView, _tab_id: TabId) {}
+
+#[cfg(target_os = "windows")]
+fn install_zoom_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, tab_id: TabId) {
+    let state = Rc::clone(state);
+    let mut token = 0;
+    let handler = ZoomFactorChangedEventHandler::create(Box::new(move |controller, _| {
+        if let Some(controller) = controller {
+            let mut factor = 1.0;
+            unsafe {
+                let _ = controller.ZoomFactor(&mut factor);
+            }
+            if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+                tab.zoom = factor;
+            }
+            push_ui_state(&state);
+        }
+        Ok(())
+    }));
+    unsafe {
+        let _ = webview
+            .controller()
+            .add_ZoomFactorChanged(&handler, &mut token);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn install_zoom_handler(_state: &Rc<RefCell<AppState>>, _webview: &WebView, _tab_id: TabId) {}
+
+#[cfg(target_os = "windows")]
+fn install_adblock_handler(state: &Rc<RefCell<AppState>>, webview: &WebView) {
+    const BLOCKED: &[&str] = &[
+        "doubleclick.net",
+        "googlesyndication.com",
+        "googleadservices.com",
+        "adservice.google.com",
+        "adnxs.com",
+        "criteo.com",
+        "taboola.com",
+        "outbrain.com",
+        "scorecardresearch.com",
+        "quantserve.com",
+        "zedo.com",
+        "popads.net",
+    ];
+    let environment = webview.environment();
+    let state = Rc::clone(state);
+    let mut token = 0;
+    let handler = WebResourceRequestedEventHandler::create(Box::new(move |_sender, args| {
+        let Some(args) = args else {
+            return Ok(());
+        };
+        if !state.borrow().settings.adblock {
+            return Ok(());
+        }
+        let Ok(request) = (unsafe { args.Request() }) else {
+            return Ok(());
+        };
+        let mut raw = windows_core::PWSTR::null();
+        unsafe {
+            let _ = request.Uri(&mut raw);
+        }
+        let url = unsafe { raw.to_string().unwrap_or_default() };
+        let blocked = Url::parse(&url)
+            .ok()
+            .and_then(|parsed| parsed.host_str().map(str::to_owned))
+            .is_some_and(|host| BLOCKED.iter().any(|domain| host.ends_with(domain)));
+        if blocked {
+            if let Ok(response) = unsafe {
+                environment.CreateWebResourceResponse(
+                    None::<&IStream>,
+                    403,
+                    PCWSTR::null(),
+                    PCWSTR::null(),
+                )
+            } {
+                unsafe {
+                    let _ = args.SetResponse(&response);
+                }
+            }
+        }
+        Ok(())
+    }));
+    unsafe {
+        let wide: Vec<u16> = "*\0".encode_utf16().collect();
+        let _ = webview.webview().AddWebResourceRequestedFilter(
+            PCWSTR(wide.as_ptr()),
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+        );
+        let _ = webview
+            .webview()
+            .add_WebResourceRequested(&handler, &mut token);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn install_adblock_handler(_state: &Rc<RefCell<AppState>>, _webview: &WebView) {}
 
 fn storage_query(state: &Rc<RefCell<AppState>>, request_id: u64, query: StorageQuery) {
     if let Some(storage) = &state.borrow().storage {
@@ -2589,6 +2747,47 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 storage_query(state, request_id, StorageQuery::Suggest { query, limit });
             }
         }
+        Some("ui.vertical") => {
+            let enabled = message
+                .get("enabled")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            let _ = state.borrow().proxy.send_event(AppEvent::Vertical(enabled));
+        }
+        Some("sidebar.collapse") => {
+            {
+                let mut state = state.borrow_mut();
+                state.sidebar_collapsed = !state.sidebar_collapsed;
+            }
+            apply_layout(state);
+            push_ui_state(state);
+        }
+        Some("sidebar.ready") => push_ui_state(state),
+        Some("window.min") => state.borrow().window.set_minimized(true),
+        Some("window.max") => {
+            let window = state.borrow().window.clone();
+            if window.is_maximized() {
+                window.set_maximized(false);
+            } else {
+                window.set_maximized(true);
+            }
+        }
+        Some("window.close") => {
+            let _ = state.borrow().proxy.send_event(AppEvent::Exit);
+        }
+        Some("window.drag") => {
+            let window = state.borrow().window.clone();
+            let _ = window.drag_window();
+        }
+        Some("zoom.reset") => apply_zoom(state, 1.0),
+        Some("tabs.newUrl") => {
+            if let Some(url) = message.get("url").and_then(|value| value.as_str()) {
+                let _ = state
+                    .borrow()
+                    .proxy
+                    .send_event(AppEvent::OpenUrl(url.to_owned()));
+            }
+        }
         Some("ui.find") => {
             let open = message
                 .get("open")
@@ -2735,6 +2934,9 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             if let Some(value) = message.get("clearOnExit").and_then(|value| value.as_bool()) {
                 settings.clear_on_exit = value;
             }
+            if let Some(value) = message.get("adblock").and_then(|value| value.as_bool()) {
+                settings.adblock = value;
+            }
             if !state.borrow().private {
                 let _ = rustle_storage::save_settings(&settings);
             }
@@ -2744,6 +2946,50 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
         Some(other) => eprintln!("[ipc] unknown message: {other}"),
         None => eprintln!("[ipc] missing type"),
     }
+}
+
+fn create_sidebar(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
+    let (height, window) = {
+        let state = state.borrow();
+        (state.height, state.window.clone())
+    };
+    let mut context = state
+        .borrow_mut()
+        .context
+        .take()
+        .expect("WebContext must exist while creating sidebar");
+    let ipc_state = Rc::clone(state);
+    let result = WebViewBuilder::new_with_web_context(&mut context)
+        .with_bounds(rect(
+            0,
+            CHROME_COLLAPSED,
+            220,
+            height.saturating_sub(CHROME_COLLAPSED),
+        ))
+        .with_browser_accelerator_keys(false)
+        .with_custom_protocol("rustle".into(), protocol_handler)
+        .with_url(SIDEBAR_URL)
+        .with_ipc_handler(move |request| handle_ipc(&ipc_state, request.body()))
+        .build_as_child(window.as_ref());
+    state.borrow_mut().context = Some(context);
+    let sidebar = result?;
+    state.borrow_mut().sidebar = Some(sidebar);
+    {
+        let state_ref = state.borrow();
+        if let Some(sidebar) = &state_ref.sidebar {
+            install_accelerators_for_view(state, sidebar);
+            let _ = sidebar.set_visible(true);
+            let _ = sidebar.set_bounds(rect(
+                0,
+                CHROME_COLLAPSED,
+                220,
+                height.saturating_sub(CHROME_COLLAPSED),
+            ));
+        }
+    }
+    apply_layout(state);
+    raise_chrome(state);
+    Ok(())
 }
 
 fn create_chrome(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
@@ -2781,6 +3027,44 @@ fn create_chrome(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
     apply_layout(state);
     raise_chrome(state);
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn GetWindowLongPtrW(hwnd: isize, index: i32) -> isize;
+    fn SetWindowLongPtrW(hwnd: isize, index: i32, value: isize) -> isize;
+}
+
+#[cfg(target_os = "windows")]
+fn enable_frameless_resize(window: &Window) {
+    const GWL_STYLE: i32 = -16;
+    const WS_THICKFRAME: isize = 0x0004_0000;
+    const WS_MINIMIZEBOX: isize = 0x0002_0000;
+    const WS_MAXIMIZEBOX: isize = 0x0001_0000;
+    const SWP_NOSIZE: u32 = 0x0001;
+    const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_NOZORDER: u32 = 0x0004;
+    const SWP_FRAMECHANGED: u32 = 0x0020;
+
+    let hwnd = window.hwnd();
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        SetWindowLongPtrW(
+            hwnd,
+            GWL_STYLE,
+            style | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+        );
+        SetWindowPos(
+            hwnd,
+            0,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED,
+        );
+    }
 }
 
 fn cleanup_stale_private_dirs() {
@@ -2896,10 +3180,14 @@ fn main() -> wry::Result<()> {
             .with_title("Rustle")
             .with_inner_size(TaoLogicalSize::new(1280.0, 800.0))
             .with_min_inner_size(TaoLogicalSize::new(720.0, 480.0))
+            .with_decorations(false)
             .with_visible(false)
             .build(&event_loop)
             .expect("create window"),
     );
+    window.set_undecorated_shadow(false);
+    #[cfg(target_os = "windows")]
+    enable_frameless_resize(&window);
     mark("window");
 
     let stress_cycles = std::env::args().find_map(|arg| {
@@ -3012,6 +3300,20 @@ fn main() -> wry::Result<()> {
             },
             Event::UserEvent(AppEvent::OpenUrl(url)) => {
                 open_external_url(&state, &url);
+            }
+            Event::UserEvent(AppEvent::Vertical(enabled)) => {
+                state.borrow_mut().vertical = enabled;
+                if enabled {
+                    if state.borrow().sidebar.is_none() {
+                        if let Err(error) = create_sidebar(&state) {
+                            eprintln!("[sidebar] create failed: {error}");
+                        }
+                    }
+                } else {
+                    state.borrow_mut().sidebar = None;
+                }
+                apply_layout(&state);
+                push_ui_state(&state);
             }
             Event::UserEvent(AppEvent::Focus) => {
                 state.borrow().window.set_visible(true);
