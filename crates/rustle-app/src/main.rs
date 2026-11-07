@@ -10,6 +10,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     fs,
+    io::Read,
     path::{Path, PathBuf},
     process::Command as ProcessCommand,
     rc::Rc,
@@ -72,6 +73,9 @@ use windows::Win32::System::Com::IStream;
 use windows_core::{Interface, PCWSTR};
 
 const CHROME_COLLAPSED: u32 = 78;
+const CHROME_VERTICAL: u32 = 44;
+const SIDEBAR_WIDTH: u32 = 282;
+const SIDEBAR_COLLAPSED: u32 = 56;
 const CHROME_URL: &str = "rustle://localhost/chrome/index.html";
 const NEWTAB_URL: &str = "rustle://localhost/newtab/index.html";
 const SIDEBAR_URL: &str = "rustle://localhost/sidebar/index.html";
@@ -94,7 +98,10 @@ enum AppEvent {
     BookmarksRestored(Vec<BookmarkEntry>),
     LoadTimeout(TabId),
     ContentIpc(TabId, String),
+    RefreshFavicon(TabId),
+    FaviconFetched(TabId, String, Vec<u8>),
     Vertical(bool),
+    LayoutTick,
     Focus,
     NewTab,
     Activate(TabId),
@@ -174,8 +181,6 @@ struct AppState {
     storage: Option<Sender<StorageCommand>>,
     dropdown_open: bool,
     dropdown_height: u32,
-    bookmark_bar: bool,
-    bookmark_bar_visible: bool,
     bookmarks: Vec<BookmarkEntry>,
     menu_open: bool,
     find_open: bool,
@@ -186,6 +191,15 @@ struct AppState {
     sidebar: Option<WebView>,
     vertical: bool,
     sidebar_collapsed: bool,
+    layout_anim: Option<LayoutAnimation>,
+}
+
+struct LayoutAnimation {
+    started: Instant,
+    from_top: u32,
+    to_top: u32,
+    from_side: u32,
+    to_side: u32,
 }
 
 impl AppState {
@@ -214,8 +228,6 @@ impl AppState {
             storage: None,
             dropdown_open: false,
             dropdown_height: 360,
-            bookmark_bar: false,
-            bookmark_bar_visible: true,
             bookmarks: Vec::new(),
             menu_open: false,
             find_open: false,
@@ -226,6 +238,7 @@ impl AppState {
             sidebar: None,
             vertical: false,
             sidebar_collapsed: false,
+            layout_anim: None,
         }
     }
 
@@ -569,7 +582,6 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
             "zoom": active.map(|tab| tab.zoom).unwrap_or(1.0),
             "vertical": state.vertical,
             "sidebarCollapsed": state.sidebar_collapsed,
-            "bookmarkBarVisible": state.bookmark_bar_visible,
             "secure": url.starts_with("https://"),
             "bookmarks": state.bookmarks,
             "settings": {
@@ -761,6 +773,29 @@ fn start_window_drag(window: &Window) {
 #[cfg(not(target_os = "windows"))]
 fn start_window_drag(_window: &Window) {}
 
+fn start_layout_animation(
+    state: &Rc<RefCell<AppState>>,
+    from_top: u32,
+    to_top: u32,
+    from_side: u32,
+    to_side: u32,
+) {
+    let proxy = state.borrow().proxy.clone();
+    state.borrow_mut().layout_anim = Some(LayoutAnimation {
+        started: Instant::now(),
+        from_top,
+        to_top,
+        from_side,
+        to_side,
+    });
+    std::thread::spawn(move || {
+        for _ in 0..18 {
+            std::thread::sleep(Duration::from_millis(14));
+            let _ = proxy.send_event(AppEvent::LayoutTick);
+        }
+    });
+}
+
 fn apply_layout(state: &Rc<RefCell<AppState>>) {
     let (
         width,
@@ -769,7 +804,6 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
         overlay_mode,
         dropdown_open,
         dropdown_height,
-        bookmark_bar,
         find_open,
         vertical,
         sidebar_collapsed,
@@ -786,7 +820,6 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             overlay_mode,
             state.dropdown_open,
             state.dropdown_height,
-            state.bookmark_bar,
             state.find_open,
             state.vertical,
             state.sidebar_collapsed,
@@ -794,26 +827,47 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
         )
     };
 
-    let collapsed = if bookmark_bar {
-        CHROME_COLLAPSED + 30
+    let target_top = if vertical {
+        CHROME_VERTICAL
     } else {
         CHROME_COLLAPSED
+    };
+    let target_side = if vertical {
+        if sidebar_collapsed {
+            SIDEBAR_COLLAPSED
+        } else {
+            SIDEBAR_WIDTH
+        }
+    } else {
+        0
+    };
+    let (top, sidebar_width, sidebar_visible, animation_finished) = {
+        let state = state.borrow();
+        if let Some(anim) = &state.layout_anim {
+            let progress = (anim.started.elapsed().as_millis() as f32 / 252.0).clamp(0.0, 1.0);
+            let top = anim.from_top as f32 + (anim.to_top as f32 - anim.from_top as f32) * progress;
+            let side =
+                anim.from_side as f32 + (anim.to_side as f32 - anim.from_side as f32) * progress;
+            (
+                top.round() as u32,
+                side.round() as u32,
+                true,
+                progress >= 1.0,
+            )
+        } else {
+            (target_top, target_side, vertical, false)
+        }
     };
     let chrome_height = if overlay_mode {
         height
     } else if dropdown_open {
-        (dropdown_height + collapsed.saturating_sub(CHROME_COLLAPSED)).clamp(collapsed, height)
+        (dropdown_height + top.saturating_sub(CHROME_COLLAPSED)).clamp(top, height)
     } else if find_open {
-        (collapsed + 44).min(height)
+        (top + 44).min(height)
     } else if menu_open {
-        (collapsed + 250).min(height)
+        (top + 250).min(height)
     } else {
-        collapsed
-    };
-    let sidebar_width = if vertical {
-        if sidebar_collapsed { 48 } else { 220 }
-    } else {
-        0
+        top
     };
     let content_width = width.saturating_sub(sidebar_width);
 
@@ -823,14 +877,9 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             let _ = chrome.set_bounds(rect(0, 0, width, chrome_height));
         }
         if let Some(sidebar) = &state.sidebar {
-            let _ = sidebar.set_visible(vertical);
-            if vertical {
-                let _ = sidebar.set_bounds(rect(
-                    0,
-                    collapsed,
-                    sidebar_width,
-                    height.saturating_sub(collapsed),
-                ));
+            let _ = sidebar.set_visible(sidebar_visible);
+            if sidebar_visible {
+                let _ = sidebar.set_bounds(rect(0, top, sidebar_width, height.saturating_sub(top)));
             }
         }
 
@@ -844,9 +893,9 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
                 let _ = webview.set_visible(true);
                 let _ = webview.set_bounds(rect(
                     sidebar_width,
-                    collapsed,
+                    top,
                     content_width,
-                    height.saturating_sub(collapsed),
+                    height.saturating_sub(top),
                 ));
             } else {
                 let _ = webview.set_visible(false);
@@ -855,8 +904,16 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
     }
 
     raise_chrome(state);
-    if vertical {
+    if sidebar_visible {
         raise_sidebar(state);
+    }
+    if animation_finished {
+        state.borrow_mut().layout_anim = None;
+        let still_vertical = state.borrow().vertical;
+        if !still_vertical {
+            let sidebar = state.borrow_mut().sidebar.take();
+            drop(sidebar);
+        }
     }
 }
 
@@ -974,6 +1031,18 @@ fn on_page_load(state: &Rc<RefCell<AppState>>, tab_id: TabId, event: PageLoadEve
             if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
                 tab.loading = false;
             }
+            request_tab_favicon(state, tab_id);
+            let page_url = state
+                .borrow()
+                .tab(tab_id)
+                .map(|tab| tab.url.clone())
+                .unwrap_or_default();
+            fetch_site_favicon(state, tab_id, &page_url);
+            let proxy = state.borrow().proxy.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(1800));
+                let _ = proxy.send_event(AppEvent::RefreshFavicon(tab_id));
+            });
         }
     }
     push_ui_state(state);
@@ -981,7 +1050,7 @@ fn on_page_load(state: &Rc<RefCell<AppState>>, tab_id: TabId, event: PageLoadEve
 }
 
 fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
-    let (url, visible, width, height, window, proxy) = {
+    let (url, visible, width, height, top, window, proxy) = {
         let state = state.borrow();
         let Some(tab) = state.tab(tab_id) else {
             return;
@@ -994,6 +1063,11 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
             tab.id == state.active,
             state.width,
             state.height,
+            if state.vertical {
+                CHROME_VERTICAL
+            } else {
+                CHROME_COLLAPSED
+            },
             state.window.clone(),
             state.proxy.clone(),
         )
@@ -1012,9 +1086,9 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
     let builder = WebViewBuilder::new_with_web_context(&mut context)
         .with_bounds(rect(
             0,
-            CHROME_COLLAPSED,
+            top,
             width,
-            height.saturating_sub(CHROME_COLLAPSED),
+            height.saturating_sub(top),
         ))
         .with_visible(visible)
         .with_browser_accelerator_keys(false)
@@ -2157,13 +2231,139 @@ fn base64_encode(data: &[u8]) -> String {
 
 fn favicon_data(name: &str) -> Option<String> {
     let bytes = fs::read(favicon_cache_path(name)).ok()?;
-    Some(format!("data:image/png;base64,{}", base64_encode(&bytes)))
+    let mime = image_mime(&bytes);
+    if mime == "application/octet-stream" {
+        return None;
+    }
+    Some(format!("data:{mime};base64,{}", base64_encode(&bytes)))
 }
 
 fn cached_favicon(url: &str) -> Option<String> {
     let name = favicon_name(url);
     favicon_cache_path(&name).exists().then_some(name)
 }
+
+#[cfg(target_os = "windows")]
+fn image_mime(bytes: &[u8]) -> &'static str {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "image/png"
+    } else if bytes.starts_with(b"\x00\x00\x01\x00") {
+        "image/x-icon"
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        "image/jpeg"
+    } else if bytes.starts_with(b"GIF8") {
+        "image/gif"
+    } else if bytes
+        .iter()
+        .copied()
+        .find(|byte| !byte.is_ascii_whitespace())
+        .is_some_and(|byte| byte == b'<')
+    {
+        "image/svg+xml"
+    } else {
+        "application/octet-stream"
+    }
+}
+
+fn fetch_site_favicon(state: &Rc<RefCell<AppState>>, tab_id: TabId, page_url: &str) {
+    let proxy = state.borrow().proxy.clone();
+    let private = state.borrow().private;
+    if private {
+        return;
+    }
+    let Ok(parsed) = Url::parse(page_url) else {
+        return;
+    };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return;
+    }
+    let Some(host) = parsed.host_str() else {
+        return;
+    };
+    let origin = format!("{}://{}", parsed.scheme(), host);
+    let icon_url = format!("{origin}/favicon.ico");
+    let name = favicon_name(page_url);
+    let page_owned = page_url.to_owned();
+    std::thread::spawn(move || {
+        let request = ureq::get(&icon_url).timeout(Duration::from_secs(7)).call();
+        let Ok(response) = request else {
+            return;
+        };
+        if response.status() != 200 {
+            return;
+        }
+        let mut bytes = Vec::new();
+        if response
+            .into_reader()
+            .take(512 * 1024)
+            .read_to_end(&mut bytes)
+            .is_err()
+        {
+            return;
+        }
+        let mime = image_mime(&bytes);
+        if mime == "application/octet-stream" {
+            return;
+        }
+        let _ = page_owned;
+        let _ = proxy.send_event(AppEvent::FaviconFetched(tab_id, name, bytes));
+    });
+}
+
+fn request_tab_favicon(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
+    let (webview, url, private) = {
+        let state = state.borrow();
+        let Some(tab) = state.tab(tab_id) else {
+            return;
+        };
+        let Some(webview) = &tab.webview else {
+            return;
+        };
+        (webview.webview(), tab.url.clone(), state.private)
+    };
+    if private || !(url.starts_with("http://") || url.starts_with("https://")) {
+        return;
+    }
+    let Ok(webview15) = webview.cast::<ICoreWebView2_15>() else {
+        return;
+    };
+    let state = Rc::clone(state);
+    let completed = GetFaviconCompletedHandler::create(Box::new(move |result, stream| {
+        if result.is_ok() {
+            if let Some(stream) = stream {
+                let bytes = read_istream(&stream);
+                if !bytes.is_empty() {
+                    let url = state
+                        .borrow()
+                        .tab(tab_id)
+                        .map(|tab| tab.url.clone())
+                        .unwrap_or_default();
+                    if url.starts_with("http://") || url.starts_with("https://") {
+                        let name = favicon_name(&url);
+                        let path = favicon_cache_path(&name);
+                        if let Some(parent) = path.parent() {
+                            let _ = fs::create_dir_all(parent);
+                        }
+                        if fs::write(&path, bytes).is_ok() {
+                            if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+                                tab.favicon = Some(name);
+                            }
+                            push_ui_state(&state);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }));
+    unsafe {
+        let _ = webview15.GetFavicon(COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG, &completed);
+    }
+    std::mem::forget(completed);
+}
+
+#[cfg(not(target_os = "windows"))]
+fn request_tab_favicon(_state: &Rc<RefCell<AppState>>, _tab_id: TabId) {}
 
 #[cfg(target_os = "windows")]
 fn read_istream(stream: &IStream) -> Vec<u8> {
@@ -2955,34 +3155,6 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 apply_layout(state);
             }
         }
-        Some("ui.bookmarkBarToggle") => {
-            {
-                let mut state = state.borrow_mut();
-                state.bookmark_bar_visible = !state.bookmark_bar_visible;
-                state.bookmark_bar = state.bookmark_bar_visible && !state.bookmarks.is_empty();
-                state.settings.bookmark_bar_visible = state.bookmark_bar_visible;
-                if !state.private {
-                    let _ = rustle_storage::save_settings(&state.settings);
-                }
-            }
-            apply_layout(state);
-            push_ui_state(state);
-        }
-        Some("ui.bookmarkBar") => {
-            let visible = message
-                .get("visible")
-                .and_then(|value| value.as_bool())
-                .unwrap_or(false);
-            let changed = {
-                let mut state = state.borrow_mut();
-                let changed = state.bookmark_bar != visible;
-                state.bookmark_bar = visible;
-                changed
-            };
-            if changed {
-                apply_layout(state);
-            }
-        }
         Some("ui.dropdown") => {
             let open = message
                 .get("open")
@@ -3120,9 +3292,9 @@ fn create_sidebar(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
     let result = WebViewBuilder::new_with_web_context(&mut context)
         .with_bounds(rect(
             0,
-            CHROME_COLLAPSED,
-            220,
-            height.saturating_sub(CHROME_COLLAPSED),
+            CHROME_VERTICAL,
+            SIDEBAR_WIDTH,
+            height.saturating_sub(CHROME_VERTICAL),
         ))
         .with_browser_accelerator_keys(false)
         .with_custom_protocol("rustle".into(), protocol_handler)
@@ -3139,9 +3311,9 @@ fn create_sidebar(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
             let _ = sidebar.set_visible(true);
             let _ = sidebar.set_bounds(rect(
                 0,
-                CHROME_COLLAPSED,
-                220,
-                height.saturating_sub(CHROME_COLLAPSED),
+                CHROME_VERTICAL,
+                SIDEBAR_WIDTH,
+                height.saturating_sub(CHROME_VERTICAL),
             ));
         }
     }
@@ -3395,8 +3567,6 @@ fn main() -> wry::Result<()> {
         state.private = private;
         state.vertical = settings.vertical_tabs;
         state.sidebar_collapsed = settings.sidebar_collapsed;
-        state.bookmark_bar_visible = settings.bookmark_bar_visible;
-        state.bookmark_bar = state.bookmark_bar_visible && !startup_bookmarks.is_empty();
         state.bookmarks = startup_bookmarks;
         state.storage = if private {
             None
@@ -3467,6 +3637,24 @@ fn main() -> wry::Result<()> {
             Event::UserEvent(AppEvent::OpenUrl(url)) => {
                 open_external_url(&state, &url);
             }
+            Event::UserEvent(AppEvent::LayoutTick) => {
+                apply_layout(&state);
+            }
+            Event::UserEvent(AppEvent::RefreshFavicon(tab_id)) => {
+                request_tab_favicon(&state, tab_id);
+            }
+            Event::UserEvent(AppEvent::FaviconFetched(tab_id, name, bytes)) => {
+                let path = favicon_cache_path(&name);
+                if let Some(parent) = path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                if fs::write(&path, bytes).is_ok() {
+                    if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+                        tab.favicon = Some(name);
+                    }
+                    push_ui_state(&state);
+                }
+            }
             Event::UserEvent(AppEvent::ContentIpc(tab_id, body)) => {
                 if let Ok(message) = serde_json::from_str::<Value>(&body) {
                     if message.get("type").and_then(Value::as_str) == Some("zoom.wheel") {
@@ -3501,6 +3689,34 @@ fn main() -> wry::Result<()> {
                 }
             }
             Event::UserEvent(AppEvent::Vertical(enabled)) => {
+                let (from_top, from_side) = {
+                    let state_ref = state.borrow();
+                    let top = if state_ref.vertical {
+                        CHROME_VERTICAL
+                    } else {
+                        CHROME_COLLAPSED
+                    };
+                    let side = if state_ref.vertical {
+                        if state_ref.sidebar_collapsed {
+                            SIDEBAR_COLLAPSED
+                        } else {
+                            SIDEBAR_WIDTH
+                        }
+                    } else {
+                        0
+                    };
+                    (top, side)
+                };
+                let to_top = if enabled { CHROME_VERTICAL } else { CHROME_COLLAPSED };
+                let to_side = if enabled {
+                    if state.borrow().sidebar_collapsed {
+                        SIDEBAR_COLLAPSED
+                    } else {
+                        SIDEBAR_WIDTH
+                    }
+                } else {
+                    0
+                };
                 {
                     let mut state_ref = state.borrow_mut();
                     state_ref.vertical = enabled;
@@ -3509,14 +3725,11 @@ fn main() -> wry::Result<()> {
                         let _ = rustle_storage::save_settings(&state_ref.settings);
                     }
                 }
-                if enabled {
-                    if state.borrow().sidebar.is_none() {
-                        if let Err(error) = create_sidebar(&state) {
-                            eprintln!("[sidebar] create failed: {error}");
-                        }
+                start_layout_animation(&state, from_top, to_top, from_side, to_side);
+                if enabled && state.borrow().sidebar.is_none() {
+                    if let Err(error) = create_sidebar(&state) {
+                        eprintln!("[sidebar] create failed: {error}");
                     }
-                } else {
-                    state.borrow_mut().sidebar = None;
                 }
                 apply_layout(&state);
                 push_ui_state(&state);
@@ -3559,7 +3772,6 @@ fn main() -> wry::Result<()> {
             Event::UserEvent(AppEvent::BookmarksRestored(items)) => {
                 {
                     let mut state = state.borrow_mut();
-                    state.bookmark_bar = state.bookmark_bar_visible && !items.is_empty();
                     state.bookmarks = items;
                 }
                 apply_layout(&state);

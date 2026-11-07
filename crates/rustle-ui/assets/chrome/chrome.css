@@ -9,8 +9,8 @@
   --accent: #e08a5f;
   --danger: #e06c5f;
   --radius: 8px;
-  --mono: ui-monospace, "Cascadia Code", "Roboto Mono", Consolas, monospace;
-  --sans: "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 * {
@@ -45,12 +45,19 @@ input:focus-visible,
 }
 
 .tabs {
+  flex: 0 0 34px;
   height: 34px;
   display: flex;
   align-items: center;
   gap: 2px;
   padding: 0 8px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
   background: var(--bg);
+  transition:
+    height 0.22s ease,
+    opacity 0.18s ease,
+    border-color 0.2s ease;
 }
 
 .tabs__items {
@@ -389,13 +396,16 @@ html.error-mode .newtab-view {
 .newtab__shortcuts {
   width: min(760px, 100%);
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
   gap: 10px;
   margin-top: 10px;
 }
 
 .newtab__shortcut {
   position: relative;
+  min-width: 0;
+  min-height: 88px;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -452,6 +462,13 @@ html.error-mode .newtab-view {
 .newtab__add:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.newtab__shortcut > span:not(.newtab__mark) {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .newtab__mark {
@@ -985,44 +1002,6 @@ html[data-theme="light"] .suggestions {
   object-fit: contain;
 }
 
-.bookmark-bar {
-  position: absolute;
-  top: 78px;
-  left: 0;
-  right: 0;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 10px;
-  overflow: hidden;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-  z-index: 2;
-}
-
-.bookmark-bar[hidden] {
-  display: none;
-}
-
-.bookmark-bar__item {
-  max-width: 180px;
-  padding: 5px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.bookmark-bar__item:hover {
-  background: var(--bg-hover);
-}
-
 .bookmark-folder {
   padding: 14px 12px 4px;
   color: var(--text-muted);
@@ -1172,6 +1151,14 @@ html.private-mode .build-badge {
 
 .address__input--full {
   color: var(--text-muted);
+}
+
+html.vertical-mode .tabs {
+  height: 0;
+  opacity: 0;
+  border-bottom-color: transparent;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 html.vertical-mode .tabs__items,

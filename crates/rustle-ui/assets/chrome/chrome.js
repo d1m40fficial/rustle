@@ -325,7 +325,7 @@
               async () => {
                 await request("bookmarks.remove", { entryId: item.id });
                 loadBookmarks();
-                loadBookmarkBar();
+                refreshBookmarkTiles();
               },
             ),
           );
@@ -371,31 +371,63 @@
     if (!container) {
       return;
     }
-    const items = readShortcuts();
+    const custom = readShortcuts();
+    const customUrls = new Set(custom.map((item) => item.url));
+    const bookmarks = (current.bookmarks || [])
+      .filter((item) => item.url && !customUrls.has(item.url))
+      .map((item, index) => {
+        let host = item.url;
+        try {
+          host = new URL(item.url).hostname.replace(/^www\./, "");
+        } catch {
+          // keep URL for internal entries
+        }
+        const title = (item.title || "").trim() || host;
+        return {
+          url: item.url,
+          title,
+          mark: (host || title).slice(0, 2).toUpperCase(),
+          bookmark: true,
+          bookmarkIndex: index,
+        };
+      });
+    const items = [...custom, ...bookmarks];
     container.replaceChildren();
     items.forEach((item, index) => {
       const tile = document.createElement("div");
       tile.className = "newtab__shortcut";
       tile.tabIndex = 0;
       tile.setAttribute("role", "button");
+      let title = item.title || item.url;
+      if (/^https?:\/\//.test(title)) {
+        try {
+          title = new URL(item.url).hostname.replace(/^www\./, "");
+        } catch {
+          // keep as-is
+        }
+      }
       const mark = document.createElement("span");
       mark.className = "newtab__mark";
-      mark.textContent = item.mark || (item.title || item.url).slice(0, 2).toUpperCase();
+      mark.textContent = item.mark || title.slice(0, 2).toUpperCase();
       const label = document.createElement("span");
-      label.textContent = item.title || item.url;
+      label.textContent = title;
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "shortcut__remove";
       remove.title = "Удалить плитку";
       remove.setAttribute("aria-label", "Удалить плитку");
       remove.textContent = "×";
-      remove.addEventListener("click", (event) => {
-        event.stopPropagation();
-        const next = readShortcuts().filter((_, i) => i !== index);
-        saveShortcuts(next);
-        renderShortcuts();
-      });
-      tile.append(mark, label, remove);
+      if (!item.bookmark) {
+        remove.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const next = readShortcuts().filter((entry) => entry.url !== item.url);
+          saveShortcuts(next);
+          renderShortcuts();
+        });
+        tile.append(mark, label, remove);
+      } else {
+        tile.append(mark, label);
+      }
       tile.addEventListener("click", () => send({ type: "nav.go", url: item.url }));
       tile.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
@@ -550,34 +582,11 @@
     input.select();
   };
 
-  const renderBookmarkBar = (items, visible = true) => {
-    const bar = byId("bookmark-bar");
-    if (!bar) {
-      return;
-    }
-    bar.replaceChildren();
-    if (!visible || !items.length) {
-      bar.hidden = true;
-      document.documentElement.style.setProperty("--chrome-offset", "78px");
-      return;
-    }
-    bar.hidden = false;
-    document.documentElement.style.setProperty("--chrome-offset", "108px");
-    items.slice(0, 16).forEach((item) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "bookmark-bar__item";
-      button.textContent = item.title || item.url;
-      button.title = item.url;
-      button.addEventListener("click", () => send({ type: "nav.go", url: item.url }));
-      bar.append(button);
-    });
-  };
-
-  const loadBookmarkBar = async () => {
+  const refreshBookmarkTiles = async () => {
     try {
       const data = await request("bookmarks.list");
-      renderBookmarkBar(data.items || [], current.bookmarkBarVisible !== false);
+      current.bookmarks = data.items || [];
+      renderShortcuts();
     } catch (error) {
       console.warn(error);
     }
@@ -591,7 +600,7 @@
       loadHistory(byId("history-search")?.value.trim() || "");
     } else if (page === "bookmarks") {
       loadBookmarks();
-      loadBookmarkBar();
+      refreshBookmarkTiles();
     } else if (page === "settings") {
       populateSettings();
     } else if (page === "downloads") {
@@ -706,6 +715,15 @@
     document.documentElement.classList.toggle("error-mode", Boolean(error));
     document.documentElement.classList.toggle("vertical-mode", Boolean(payload.vertical));
     document.documentElement.classList.toggle("overlay-mode", mode !== "web");
+    document.documentElement.style.setProperty(
+      "--sidebar-width",
+      payload.vertical ? (payload.sidebarCollapsed ? "56px" : "282px") : "0px",
+    );
+    document.documentElement.style.setProperty("--chrome-offset", payload.vertical ? "44px" : "78px");
+    if (Array.isArray(payload.bookmarks)) {
+      current.bookmarks = payload.bookmarks;
+      renderShortcuts();
+    }
 
     if (internal) {
       const page = payload.internalPage || "";
@@ -907,7 +925,7 @@
           });
           bookmark.classList.toggle("is-active", Boolean(result.bookmarked));
           bookmark.title = result.bookmarked ? "Убрать из закладок" : "Добавить в закладки";
-          loadBookmarkBar();
+          refreshBookmarkTiles();
         } catch (error) {
           console.warn(error);
         }
@@ -954,7 +972,7 @@
       importBookmarks.addEventListener("click", async () => {
         await request("bookmarks.import");
         loadBookmarks();
-        loadBookmarkBar();
+        refreshBookmarkTiles();
       });
     }
 
@@ -1129,21 +1147,15 @@
             url: current.url,
             title: current.title || current.url,
           });
-          loadBookmarkBar();
+          const data = await request("bookmarks.list");
+          current.bookmarks = data.items || [];
+          renderShortcuts();
         } catch (error) {
           console.warn(error);
         }
         closeMenu();
       });
     }
-    const menuBar = byId("menu-bookmarks-bar");
-    if (menuBar) {
-      menuBar.addEventListener("click", () => {
-        send({ type: "ui.bookmarkBarToggle" });
-        closeMenu();
-      });
-    }
-
     const toolbarNewTab = byId("toolbar-new-tab");
     if (toolbarNewTab) {
       toolbarNewTab.addEventListener("click", () => send({ type: "tabs.new" }));
@@ -1260,7 +1272,6 @@
     }
 
     send({ type: "chrome.ready" });
-    loadBookmarkBar();
   };
 
   if (document.readyState === "loading") {

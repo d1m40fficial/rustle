@@ -8,11 +8,17 @@
 </head>
 <body>
   <header class="sidebar-head">
-    <span class="sidebar-brand">Rustle</span>
-    <button class="sidebar-collapse" id="collapse" type="button" title="Свернуть панель" aria-label="Свернуть панель">«</button>
+    <div class="sidebar-heading">
+      <span class="sidebar-kicker">Вкладки</span>
+      <span class="sidebar-count" id="count">0</span>
+    </div>
+    <button class="sidebar-collapse" id="collapse" type="button" title="Свернуть панель" aria-label="Свернуть панель">‹</button>
   </header>
   <div class="sidebar-tabs" id="tabs" role="tablist" aria-label="Вкладки"></div>
-  <button class="sidebar-new" id="new-tab" type="button" title="Новая вкладка (Ctrl+T)">+ <span>Новая вкладка</span></button>
+  <footer class="sidebar-foot">
+    <button class="sidebar-new" id="new-tab" type="button" title="Новая вкладка (Ctrl+T)">+ <span>Новая вкладка</span></button>
+    <span class="sidebar-hint">Ctrl+T</span>
+  </footer>
   <script src="sidebar.js"></script>
 </body>
 </html>

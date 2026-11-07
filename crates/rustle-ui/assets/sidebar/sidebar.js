@@ -27,9 +27,30 @@
     }
   };
 
+  const hostFor = (tab) => {
+    const url = tab.url || "";
+    if (url.startsWith("rustle://")) {
+      return url.replace("rustle://", "").split("/")[0].toUpperCase();
+    }
+    try {
+      return new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+      return "";
+    }
+  };
+
   const render = () => {
     document.documentElement.dataset.theme = current.theme === "light" ? "light" : "dark";
     document.body.classList.toggle("collapsed", Boolean(current.sidebarCollapsed));
+    const count = byId("count");
+    if (count) {
+      count.textContent = String((current.tabs || []).length);
+    }
+    const collapse = byId("collapse");
+    if (collapse) {
+      collapse.textContent = current.sidebarCollapsed ? "›" : "‹";
+      collapse.title = current.sidebarCollapsed ? "Развернуть панель" : "Свернуть панель";
+    }
     const container = byId("tabs");
     container.replaceChildren();
 
@@ -50,9 +71,15 @@
         favicon.textContent = initial(tab);
       }
 
+      const copy = document.createElement("span");
+      copy.className = "sidebar-tab__copy";
       const title = document.createElement("span");
       title.className = "sidebar-tab__title";
       title.textContent = tab.title || "Вкладка";
+      const host = document.createElement("span");
+      host.className = "sidebar-tab__host";
+      host.textContent = hostFor(tab);
+      copy.append(title, host);
 
       const close = document.createElement("button");
       close.type = "button";
@@ -64,7 +91,7 @@
         send({ type: "tabs.close", id: tab.id });
       });
 
-      row.append(favicon, title, close);
+      row.append(favicon, copy, close);
       row.addEventListener("click", () => send({ type: "tabs.activate", id: tab.id }));
       row.addEventListener("auxclick", (event) => {
         if (event.button === 1) {

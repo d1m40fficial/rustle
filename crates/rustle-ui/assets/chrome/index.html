@@ -7,12 +7,6 @@
   <link rel="stylesheet" href="chrome.css">
 </head>
 <body>
-  <div class="tabs" role="tablist" aria-label="Вкладки">
-    <div class="tabs__items" id="tabs"></div>
-    <button class="tab-new" type="button" id="new-tab" title="Новая вкладка (Ctrl+T)" aria-label="Новая вкладка">+</button>
-    <span class="tabs__spacer"></span>
-  </div>
-
   <div class="toolbar" role="toolbar" aria-label="Навигация">
     <div class="window-controls" id="window-controls">
       <button class="window-control window-control--close" id="win-close" type="button" title="Закрыть" aria-label="Закрыть">
@@ -61,13 +55,16 @@
         <button type="button" data-nav="rustle://bookmarks">Закладки</button>
         <button type="button" data-nav="rustle://settings">Настройки</button>
         <button type="button" id="menu-bookmark">Добавить в закладки</button>
-        <button type="button" id="menu-bookmarks-bar">Скрыть панель закладок</button>
         <button type="button" id="menu-vertical">Вертикальные вкладки</button>
       </div>
     </div>
   </div>
 
-  <div class="bookmark-bar" id="bookmark-bar" hidden></div>
+  <div class="tabs" role="tablist" aria-label="Вкладки">
+    <div class="tabs__items" id="tabs"></div>
+    <button class="tab-new" type="button" id="new-tab" title="Новая вкладка (Ctrl+T)" aria-label="Новая вкладка">+</button>
+    <span class="tabs__spacer"></span>
+  </div>
 
   <div class="find-bar" id="find-bar" hidden>
     <input id="find-input" class="find-bar__input" type="search" placeholder="Найти на странице" autocomplete="off">

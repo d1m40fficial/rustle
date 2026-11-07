@@ -16,6 +16,7 @@ rustle-core.workspace = true
 rustle-storage.workspace = true
 rustle-ui.workspace = true
 serde_json.workspace = true
+ureq = { version = "2.12", features = ["tls"] }
 tao.workspace = true
 url.workspace = true
 wry.workspace = true
