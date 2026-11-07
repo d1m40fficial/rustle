@@ -43,7 +43,7 @@
       favicon.className = "sidebar-tab__favicon";
       if (tab.favicon) {
         const image = document.createElement("img");
-        image.src = "rustle://localhost/favicon/" + tab.favicon;
+        image.src = tab.faviconData || "rustle://localhost/favicon/" + tab.favicon;
         image.alt = "";
         favicon.append(image);
       } else {

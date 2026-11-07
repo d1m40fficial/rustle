@@ -504,6 +504,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                     "title": effective_tab_title(tab),
                     "url": display_url(&tab.url),
                     "favicon": tab.favicon,
+                    "faviconData": tab.favicon.as_deref().and_then(favicon_data),
                     "loading": tab.loading,
                     "active": tab.id == state.active,
                     "error": tab.error.clone(),
@@ -568,7 +569,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
             "zoom": active.map(|tab| tab.zoom).unwrap_or(1.0),
             "vertical": state.vertical,
             "sidebarCollapsed": state.sidebar_collapsed,
-            "bookmarkBarVisible": state.bookmark_bar && state.bookmark_bar_visible,
+            "bookmarkBarVisible": state.bookmark_bar_visible,
             "secure": url.starts_with("https://"),
             "bookmarks": state.bookmarks,
             "settings": {
@@ -2130,6 +2131,35 @@ fn favicon_cache_path(name: &str) -> PathBuf {
     rustle_storage::data_dir().join("favicons").join(name)
 }
 
+fn base64_encode(data: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = u32::from(chunk[0]);
+        let b1 = chunk.get(1).copied().map(u32::from).unwrap_or(0);
+        let b2 = chunk.get(2).copied().map(u32::from).unwrap_or(0);
+        let value = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((value >> 18) & 63) as usize] as char);
+        out.push(TABLE[((value >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[((value >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(value & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+fn favicon_data(name: &str) -> Option<String> {
+    let bytes = fs::read(favicon_cache_path(name)).ok()?;
+    Some(format!("data:image/png;base64,{}", base64_encode(&bytes)))
+}
+
 fn cached_favicon(url: &str) -> Option<String> {
     let name = favicon_name(url);
     favicon_cache_path(&name).exists().then_some(name)
@@ -2930,6 +2960,10 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 let mut state = state.borrow_mut();
                 state.bookmark_bar_visible = !state.bookmark_bar_visible;
                 state.bookmark_bar = state.bookmark_bar_visible && !state.bookmarks.is_empty();
+                state.settings.bookmark_bar_visible = state.bookmark_bar_visible;
+                if !state.private {
+                    let _ = rustle_storage::save_settings(&state.settings);
+                }
             }
             apply_layout(state);
             push_ui_state(state);
@@ -3361,8 +3395,8 @@ fn main() -> wry::Result<()> {
         state.private = private;
         state.vertical = settings.vertical_tabs;
         state.sidebar_collapsed = settings.sidebar_collapsed;
-        state.bookmark_bar = !startup_bookmarks.is_empty();
-        state.bookmark_bar_visible = true;
+        state.bookmark_bar_visible = settings.bookmark_bar_visible;
+        state.bookmark_bar = state.bookmark_bar_visible && !startup_bookmarks.is_empty();
         state.bookmarks = startup_bookmarks;
         state.storage = if private {
             None

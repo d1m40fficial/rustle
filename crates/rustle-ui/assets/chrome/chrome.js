@@ -36,6 +36,18 @@
       send({ ...payload, type, id });
     });
 
+  let lastZoomPercent = null;
+  let zoomHideTimer = 0;
+  const showZoomIndicator = () => {
+    const label = byId("zoom-label");
+    if (!label) {
+      return;
+    }
+    label.classList.add("is-visible");
+    window.clearTimeout(zoomHideTimer);
+    zoomHideTimer = window.setTimeout(() => label.classList.remove("is-visible"), 2200);
+  };
+
   let suggestionItems = [];
   let suggestionIndex = -1;
 
@@ -157,7 +169,7 @@
       if (tab.favicon) {
         favicon.classList.add("tab__favicon--image");
         const image = document.createElement("img");
-        image.src = "rustle://localhost/favicon/" + tab.favicon;
+        image.src = tab.faviconData || "rustle://localhost/favicon/" + tab.favicon;
         image.alt = "";
         image.addEventListener("error", () => {
           favicon.classList.remove("tab__favicon--image");
@@ -1038,20 +1050,47 @@
 
     const menuToggle = byId("menu-toggle");
     const appMenu = byId("app-menu");
+    const resetMenuPosition = () => {
+      if (!appMenu) {
+        return;
+      }
+      appMenu.classList.remove("app-menu--context");
+      appMenu.style.left = "";
+      appMenu.style.top = "";
+      appMenu.style.right = "";
+    };
+    const showMenu = (x, y) => {
+      if (!appMenu || !menuToggle) {
+        return;
+      }
+      if (typeof x === "number" && typeof y === "number") {
+        appMenu.classList.add("app-menu--context");
+        appMenu.style.left = Math.max(8, Math.min(x, window.innerWidth - 240)) + "px";
+        appMenu.style.top = Math.max(6, Math.min(y, 80)) + "px";
+        appMenu.style.right = "auto";
+      } else {
+        resetMenuPosition();
+      }
+      appMenu.hidden = false;
+      menuToggle.setAttribute("aria-expanded", "true");
+      send({ type: "ui.menu", open: true });
+    };
     const closeMenu = () => {
       if (appMenu && !appMenu.hidden) {
         appMenu.hidden = true;
         menuToggle?.setAttribute("aria-expanded", "false");
+        resetMenuPosition();
         send({ type: "ui.menu", open: false });
       }
     };
     if (menuToggle && appMenu) {
       menuToggle.addEventListener("click", (event) => {
         event.stopPropagation();
-        const open = appMenu.hidden;
-        appMenu.hidden = !open;
-        menuToggle.setAttribute("aria-expanded", String(open));
-        send({ type: "ui.menu", open });
+        if (appMenu.hidden) {
+          showMenu();
+        } else {
+          closeMenu();
+        }
       });
       appMenu.addEventListener("click", (event) => {
         if (event.target.closest("[data-nav]")) {
@@ -1062,6 +1101,20 @@
         if (!event.target.closest("#app-menu, #menu-toggle")) {
           closeMenu();
         }
+      });
+      document.addEventListener("contextmenu", (event) => {
+        if (!event.target.closest(".toolbar, .tabs") || event.target.closest("input, textarea, select, #app-menu")) {
+          return;
+        }
+        event.preventDefault();
+        showMenu(event.clientX, event.clientY);
+      });
+    }
+    const menuVertical = byId("menu-vertical");
+    if (menuVertical) {
+      menuVertical.addEventListener("click", () => {
+        send({ type: "ui.vertical", enabled: !current.vertical });
+        closeMenu();
       });
     }
     const menuBookmark = byId("menu-bookmark");
@@ -1091,12 +1144,64 @@
       });
     }
 
-    const verticalToggle = byId("vertical-toggle");
-    if (verticalToggle) {
-      verticalToggle.addEventListener("click", () => {
-        send({ type: "ui.vertical", enabled: !current.vertical });
-      });
+    const toolbarNewTab = byId("toolbar-new-tab");
+    if (toolbarNewTab) {
+      toolbarNewTab.addEventListener("click", () => send({ type: "tabs.new" }));
     }
+
+    const windowControls = byId("window-controls");
+    let windowDragOrigin = null;
+    let windowDragStarted = false;
+    let windowDragTimer = 0;
+    let suppressWindowClick = false;
+    if (windowControls) {
+      windowControls.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) {
+          return;
+        }
+        windowDragOrigin = { x: event.clientX, y: event.clientY };
+        windowDragStarted = false;
+        window.clearTimeout(windowDragTimer);
+        windowDragTimer = window.setTimeout(() => {
+          if (!windowDragOrigin || windowDragStarted) {
+            return;
+          }
+          windowDragStarted = true;
+          suppressWindowClick = true;
+          send({ type: "window.drag" });
+        }, 190);
+      });
+      windowControls.addEventListener(
+        "click",
+        (event) => {
+          if (suppressWindowClick) {
+            event.preventDefault();
+            event.stopPropagation();
+            suppressWindowClick = false;
+          }
+        },
+        true,
+      );
+    }
+    document.addEventListener("pointermove", (event) => {
+      if (!windowDragOrigin || windowDragStarted) {
+        return;
+      }
+      const dx = event.clientX - windowDragOrigin.x;
+      const dy = event.clientY - windowDragOrigin.y;
+      if (Math.hypot(dx, dy) < 5) {
+        return;
+      }
+      windowDragStarted = true;
+      suppressWindowClick = true;
+      window.clearTimeout(windowDragTimer);
+      send({ type: "window.drag" });
+    });
+    document.addEventListener("pointerup", () => {
+      window.clearTimeout(windowDragTimer);
+      windowDragOrigin = null;
+      windowDragStarted = false;
+    });
 
     const minimize = byId("win-min");
     if (minimize) {
@@ -1131,7 +1236,10 @@
 
     const zoomLabel = byId("zoom-label");
     if (zoomLabel) {
-      const reset = () => send({ type: "zoom.reset" });
+      const reset = () => {
+        showZoomIndicator();
+        send({ type: "zoom.reset" });
+      };
       zoomLabel.addEventListener("click", reset);
       zoomLabel.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {

@@ -258,7 +258,7 @@ html.loading #reload .icon-spinner {
   margin: 0 6px;
   padding: 0 11px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 999px;
   background: var(--bg);
 }
 
@@ -1089,37 +1089,51 @@ html.private-mode .build-badge {
 .window-controls {
   display: flex;
   align-items: center;
-  gap: 5px;
-  margin-left: 6px;
+  align-self: stretch;
+  gap: 8px;
+  margin-right: 6px;
+  padding: 0 8px 0 2px;
+  cursor: default;
 }
 
 .window-control {
-  width: 28px;
-  height: 28px;
+  width: 13px;
+  height: 13px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border);
+  padding: 0;
+  border: 0;
   border-radius: 50%;
-  background: transparent;
-  color: var(--text-muted);
+  color: #2a1c08;
   cursor: default;
 }
 
 .window-control svg {
-  width: 14px;
-  height: 14px;
+  width: 8px;
+  height: 8px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
 }
 
-.window-control:hover {
-  background: var(--bg-hover);
-  color: var(--text);
+.window-control:hover svg {
+  opacity: 0.72;
 }
 
-.window-control--close:hover {
-  border-color: var(--danger);
-  background: var(--danger);
-  color: #ffffff;
+.window-control--close {
+  background: #ff5f57;
+}
+
+.window-control--max {
+  background: #febc2e;
+}
+
+.window-control--min {
+  background: #28c840;
+}
+
+.window-control:active {
+  filter: brightness(0.88);
 }
 
 .translate-icon {
@@ -1130,12 +1144,21 @@ html.private-mode .build-badge {
 
 .zoom-label {
   min-width: 38px;
-  padding: 4px 5px;
-  border-radius: 5px;
+  padding: 4px 6px;
+  border-radius: 999px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-family: var(--mono);
+  font-size: 10px;
   text-align: center;
   cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.zoom-label.is-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .zoom-label:hover {
@@ -1211,4 +1234,9 @@ html.vertical-mode.overlay-mode .internal-page {
 
 html.vertical-mode.overlay-mode .error-view {
   padding-left: calc(var(--sidebar-width, 220px) + 48px);
+}
+
+.app-menu--context {
+  position: fixed;
+  right: auto;
 }

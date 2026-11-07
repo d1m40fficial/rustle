@@ -69,6 +69,8 @@ pub struct Settings {
     pub vertical_tabs: bool,
     #[serde(default)]
     pub sidebar_collapsed: bool,
+    #[serde(default = "default_true")]
+    pub bookmark_bar_visible: bool,
 }
 
 fn default_search_engine() -> String {
@@ -99,6 +101,7 @@ impl Default for Settings {
             adblock: true,
             vertical_tabs: false,
             sidebar_collapsed: false,
+            bookmark_bar_visible: true,
         }
     }
 }
