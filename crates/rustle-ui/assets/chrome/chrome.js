@@ -1054,9 +1054,7 @@
         send({ type: "ui.menu", open });
       });
       appMenu.addEventListener("click", (event) => {
-        const nav = event.target.closest("[data-nav]");
-        if (nav) {
-          send({ type: "nav.go", url: nav.dataset.nav });
+        if (event.target.closest("[data-nav]")) {
           closeMenu();
         }
       });
