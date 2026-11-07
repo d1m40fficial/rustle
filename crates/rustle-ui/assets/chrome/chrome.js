@@ -344,6 +344,9 @@
   ];
 
   const shortcutsKey = "rustle.shortcuts.v1";
+  const tileOrderKey = "rustle.tiles.order.v1";
+  const tileLabelsKey = "rustle.tiles.labels.v1";
+  let tileEdit = false;
 
   const readShortcuts = () => {
     try {
@@ -366,6 +369,48 @@
     }
   };
 
+  const readTileOrder = () => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(tileOrderKey) || "[]");
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const saveTileOrder = (urls) => {
+    try {
+      localStorage.setItem(tileOrderKey, JSON.stringify(urls));
+    } catch {
+      // ignore
+    }
+  };
+
+  const readTileLabels = () => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(tileLabelsKey) || "{}");
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const saveTileLabels = (labels) => {
+    try {
+      localStorage.setItem(tileLabelsKey, JSON.stringify(labels));
+    } catch {
+      // ignore
+    }
+  };
+
+  const hostForUrl = (url, fallback = "") => {
+    try {
+      return new URL(url).hostname.replace(/^www\./, "") || fallback;
+    } catch {
+      return fallback || url;
+    }
+  };
+
   const renderShortcuts = () => {
     const container = byId("newtab-shortcuts");
     if (!container) {
@@ -373,63 +418,148 @@
     }
     const custom = readShortcuts();
     const customUrls = new Set(custom.map((item) => item.url));
+    const labels = readTileLabels();
     const bookmarks = (current.bookmarks || [])
       .filter((item) => item.url && !customUrls.has(item.url))
-      .map((item, index) => {
-        let host = item.url;
-        try {
-          host = new URL(item.url).hostname.replace(/^www\./, "");
-        } catch {
-          // keep URL for internal entries
-        }
+      .map((item) => {
+        const host = hostForUrl(item.url);
         const title = (item.title || "").trim() || host;
         return {
           url: item.url,
           title,
-          mark: (host || title).slice(0, 2).toUpperCase(),
           bookmark: true,
-          bookmarkIndex: index,
         };
       });
-    const items = [...custom, ...bookmarks];
+    const items = [...custom, ...bookmarks].map((item) => {
+      let title = (item.title || "").trim();
+      if (!title || /^https?:\/\//.test(title) || title === item.url) {
+        title = hostForUrl(item.url, title || item.url);
+      }
+      if (labels[item.url]) {
+        title = labels[item.url];
+      }
+      return { ...item, title };
+    });
+    const order = readTileOrder();
+    if (order.length) {
+      items.sort((a, b) => {
+        const ai = order.indexOf(a.url);
+        const bi = order.indexOf(b.url);
+        if (ai < 0 && bi < 0) {
+          return 0;
+        }
+        if (ai < 0) {
+          return 1;
+        }
+        if (bi < 0) {
+          return -1;
+        }
+        return ai - bi;
+      });
+    }
+
+    container.classList.toggle("is-editing", tileEdit);
     container.replaceChildren();
-    items.forEach((item, index) => {
+    let draggedUrl = "";
+    items.forEach((item) => {
       const tile = document.createElement("div");
-      tile.className = "newtab__shortcut";
+      tile.className = "newtab__shortcut" + (tileEdit ? " shortcut--editable" : "");
       tile.tabIndex = 0;
       tile.setAttribute("role", "button");
-      let title = item.title || item.url;
-      if (/^https?:\/\//.test(title)) {
-        try {
-          title = new URL(item.url).hostname.replace(/^www\./, "");
-        } catch {
-          // keep as-is
-        }
-      }
+      tile.dataset.url = item.url;
+      tile.title = tileEdit ? "Перетащите плитку или нажмите карандаш" : item.title;
       const mark = document.createElement("span");
       mark.className = "newtab__mark";
-      mark.textContent = item.mark || title.slice(0, 2).toUpperCase();
+      mark.textContent = item.title.slice(0, 2).toUpperCase();
       const label = document.createElement("span");
-      label.textContent = title;
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "shortcut__remove";
-      remove.title = "Удалить плитку";
-      remove.setAttribute("aria-label", "Удалить плитку");
-      remove.textContent = "×";
+      label.className = "shortcut__label";
+      label.textContent = item.title;
+      const rename = document.createElement("button");
+      rename.type = "button";
+      rename.className = "shortcut__rename";
+      rename.title = "Переименовать плитку";
+      rename.setAttribute("aria-label", "Переименовать плитку");
+      rename.textContent = "✎";
+      rename.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const next = window.prompt("Название плитки", item.title);
+        if (next === null) {
+          return;
+        }
+        const trimmed = next.trim();
+        if (!trimmed) {
+          return;
+        }
+        const map = readTileLabels();
+        map[item.url] = trimmed;
+        saveTileLabels(map);
+        renderShortcuts();
+      });
+      tile.append(mark, label, rename);
       if (!item.bookmark) {
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "shortcut__remove";
+        remove.title = "Удалить плитку";
+        remove.setAttribute("aria-label", "Удалить плитку");
+        remove.textContent = "×";
         remove.addEventListener("click", (event) => {
           event.stopPropagation();
           const next = readShortcuts().filter((entry) => entry.url !== item.url);
           saveShortcuts(next);
           renderShortcuts();
         });
-        tile.append(mark, label, remove);
-      } else {
-        tile.append(mark, label);
+        tile.append(remove);
       }
-      tile.addEventListener("click", () => send({ type: "nav.go", url: item.url }));
+
+      if (tileEdit) {
+        tile.draggable = true;
+        tile.addEventListener("dragstart", (event) => {
+          draggedUrl = item.url;
+          tile.classList.add("shortcut--dragging");
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", item.url);
+        });
+        tile.addEventListener("dragover", (event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          tile.classList.add("shortcut--drop");
+        });
+        tile.addEventListener("dragleave", () => tile.classList.remove("shortcut--drop"));
+        tile.addEventListener("drop", (event) => {
+          event.preventDefault();
+          tile.classList.remove("shortcut--drop");
+          if (!draggedUrl || draggedUrl === item.url) {
+            return;
+          }
+          const urls = items.map((entry) => entry.url);
+          const from = urls.indexOf(draggedUrl);
+          const to = urls.indexOf(item.url);
+          if (from < 0 || to < 0) {
+            return;
+          }
+          const [moved] = urls.splice(from, 1);
+          urls.splice(to, 0, moved);
+          saveTileOrder(urls);
+          renderShortcuts();
+        });
+        tile.addEventListener("dragend", () => {
+          draggedUrl = "";
+          container.querySelectorAll(".shortcut--dragging, .shortcut--drop").forEach((node) => {
+            node.classList.remove("shortcut--dragging", "shortcut--drop");
+          });
+        });
+      }
+
+      tile.addEventListener("click", () => {
+        if (!tileEdit) {
+          send({ type: "nav.go", url: item.url });
+        }
+      });
       tile.addEventListener("keydown", (event) => {
+        if (tileEdit) {
+          return;
+        }
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           send({ type: "nav.go", url: item.url });
@@ -1159,6 +1289,15 @@
     const toolbarNewTab = byId("toolbar-new-tab");
     if (toolbarNewTab) {
       toolbarNewTab.addEventListener("click", () => send({ type: "tabs.new" }));
+    }
+    const tilesEdit = byId("tiles-edit");
+    if (tilesEdit) {
+      tilesEdit.addEventListener("click", () => {
+        tileEdit = !tileEdit;
+        tilesEdit.classList.toggle("is-active", tileEdit);
+        tilesEdit.title = tileEdit ? "Готово" : "Редактировать плитки";
+        renderShortcuts();
+      });
     }
 
     const windowControls = byId("window-controls");

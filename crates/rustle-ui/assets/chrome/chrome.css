@@ -1227,3 +1227,58 @@ html.vertical-mode.overlay-mode .error-view {
   position: fixed;
   right: auto;
 }
+
+.chrome-btn.is-active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.shortcut__label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcut__rename {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0;
+}
+
+.newtab__shortcuts.is-editing .shortcut__rename {
+  opacity: 1;
+}
+
+.shortcut__rename:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+.newtab__shortcut.shortcut--editable {
+  border-style: dashed;
+  cursor: grab;
+}
+
+.newtab__shortcut.shortcut--editable:active {
+  cursor: grabbing;
+}
+
+.newtab__shortcut.shortcut--dragging {
+  opacity: 0.35;
+}
+
+.newtab__shortcut.shortcut--drop {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
