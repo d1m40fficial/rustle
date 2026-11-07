@@ -1,14 +1,16 @@
 :root {
-  --bg: #202124;
-  --bg-elevated: #292a2d;
-  --bg-hover: #303134;
-  --border: #3c4043;
-  --border-strong: #5f6368;
-  --text: #e8eaed;
-  --text-muted: #9aa0a6;
-  --accent: #8ab4f8;
-  --danger: #f28b82;
+  --bg: #0c0c0c;
+  --bg-elevated: #111110;
+  --bg-hover: rgba(233, 230, 223, 0.055);
+  --border: rgba(233, 230, 223, 0.13);
+  --border-strong: rgba(233, 230, 223, 0.24);
+  --text: #e9e6df;
+  --text-muted: #918d85;
+  --accent: #e08a5f;
+  --danger: #e06c5f;
   --radius: 8px;
+  --mono: ui-monospace, "Cascadia Code", "Roboto Mono", Consolas, monospace;
+  --sans: "Segoe UI", system-ui, sans-serif;
 }
 
 * {
@@ -26,7 +28,7 @@ body {
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
-  font: 13px/1.2 "Segoe UI", system-ui, sans-serif;
+  font: 13px/1.2 var(--sans);
   user-select: none;
 }
 
@@ -57,7 +59,7 @@ input:focus-visible,
   align-self: flex-end;
   gap: 2px;
   min-width: 0;
-  max-width: calc(100% - 260px);
+  max-width: calc(100% - 80px);
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -182,6 +184,7 @@ input:focus-visible,
 
 .tabs__spacer {
   flex: 1;
+  align-self: stretch;
 }
 
 .build-badge {
@@ -556,15 +559,15 @@ html.error-mode .newtab-view {
 
 
 html[data-theme="light"] {
-  --bg: #f8f9fa;
-  --bg-elevated: #ffffff;
-  --bg-hover: #f1f3f4;
-  --border: #dadce0;
-  --border-strong: #bdc1c6;
-  --text: #202124;
-  --text-muted: #5f6368;
-  --accent: #1a73e8;
-  --danger: #d93025;
+  --bg: #fbfaf7;
+  --bg-elevated: #f5f2eb;
+  --bg-hover: rgba(23, 22, 20, 0.045);
+  --border: rgba(23, 22, 20, 0.12);
+  --border-strong: rgba(23, 22, 20, 0.22);
+  --text: #171614;
+  --text-muted: #7c776e;
+  --accent: #c4552d;
+  --danger: #b4432d;
 }
 
 html[data-theme="light"] .button--primary {
@@ -1085,19 +1088,27 @@ html.private-mode .build-badge {
 
 .window-controls {
   display: flex;
-  align-self: stretch;
-  margin-left: 4px;
+  align-items: center;
+  gap: 5px;
+  margin-left: 6px;
 }
 
 .window-control {
-  width: 42px;
-  height: 34px;
-  border: 0;
-  border-radius: 0;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
   background: transparent;
   color: var(--text-muted);
   cursor: default;
-  font-size: 13px;
+}
+
+.window-control svg {
+  width: 14px;
+  height: 14px;
 }
 
 .window-control:hover {
@@ -1106,7 +1117,8 @@ html.private-mode .build-badge {
 }
 
 .window-control--close:hover {
-  background: #c42b1c;
+  border-color: var(--danger);
+  background: var(--danger);
   color: #ffffff;
 }
 
@@ -1139,7 +1151,64 @@ html.private-mode .build-badge {
   color: var(--text-muted);
 }
 
-html.vertical-mode:not(.overlay-mode) .tabs__items,
-html.vertical-mode:not(.overlay-mode) .tab-new {
+html.vertical-mode .tabs__items,
+html.vertical-mode .tab-new {
   display: none;
+}
+
+.newtab__version {
+  margin-left: 8px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.menu-wrap {
+  position: relative;
+}
+
+.app-menu {
+  position: absolute;
+  top: 38px;
+  right: 0;
+  z-index: 20;
+  min-width: 220px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+}
+
+.app-menu[hidden] {
+  display: none;
+}
+
+.app-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.app-menu button:hover {
+  background: var(--bg-hover);
+}
+
+html.vertical-mode.overlay-mode .newtab-view {
+  padding-left: calc(var(--sidebar-width, 220px) + 24px);
+}
+
+html.vertical-mode.overlay-mode .internal-page {
+  padding-left: calc(var(--sidebar-width, 220px) + 32px);
+}
+
+html.vertical-mode.overlay-mode .error-view {
+  padding-left: calc(var(--sidebar-width, 220px) + 48px);
 }

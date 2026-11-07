@@ -538,16 +538,15 @@
     input.select();
   };
 
-  const renderBookmarkBar = (items) => {
+  const renderBookmarkBar = (items, visible = true) => {
     const bar = byId("bookmark-bar");
     if (!bar) {
       return;
     }
     bar.replaceChildren();
-    if (!items.length) {
+    if (!visible || !items.length) {
       bar.hidden = true;
       document.documentElement.style.setProperty("--chrome-offset", "78px");
-      send({ type: "ui.bookmarkBar", visible: false });
       return;
     }
     bar.hidden = false;
@@ -561,13 +560,12 @@
       button.addEventListener("click", () => send({ type: "nav.go", url: item.url }));
       bar.append(button);
     });
-    send({ type: "ui.bookmarkBar", visible: true });
   };
 
   const loadBookmarkBar = async () => {
     try {
       const data = await request("bookmarks.list");
-      renderBookmarkBar(data.items || []);
+      renderBookmarkBar(data.items || [], current.bookmarkBarVisible !== false);
     } catch (error) {
       console.warn(error);
     }
@@ -1038,6 +1036,63 @@
       errorBack.addEventListener("click", () => send({ type: "nav.back" }));
     }
 
+    const menuToggle = byId("menu-toggle");
+    const appMenu = byId("app-menu");
+    const closeMenu = () => {
+      if (appMenu && !appMenu.hidden) {
+        appMenu.hidden = true;
+        menuToggle?.setAttribute("aria-expanded", "false");
+        send({ type: "ui.menu", open: false });
+      }
+    };
+    if (menuToggle && appMenu) {
+      menuToggle.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const open = appMenu.hidden;
+        appMenu.hidden = !open;
+        menuToggle.setAttribute("aria-expanded", String(open));
+        send({ type: "ui.menu", open });
+      });
+      appMenu.addEventListener("click", (event) => {
+        const nav = event.target.closest("[data-nav]");
+        if (nav) {
+          send({ type: "nav.go", url: nav.dataset.nav });
+          closeMenu();
+        }
+      });
+      document.addEventListener("click", (event) => {
+        if (!event.target.closest("#app-menu, #menu-toggle")) {
+          closeMenu();
+        }
+      });
+    }
+    const menuBookmark = byId("menu-bookmark");
+    if (menuBookmark) {
+      menuBookmark.addEventListener("click", async () => {
+        if (!current.url || !/^https?:\/\//.test(current.url)) {
+          closeMenu();
+          return;
+        }
+        try {
+          await request("bookmarks.toggle", {
+            url: current.url,
+            title: current.title || current.url,
+          });
+          loadBookmarkBar();
+        } catch (error) {
+          console.warn(error);
+        }
+        closeMenu();
+      });
+    }
+    const menuBar = byId("menu-bookmarks-bar");
+    if (menuBar) {
+      menuBar.addEventListener("click", () => {
+        send({ type: "ui.bookmarkBarToggle" });
+        closeMenu();
+      });
+    }
+
     const verticalToggle = byId("vertical-toggle");
     if (verticalToggle) {
       verticalToggle.addEventListener("click", () => {
@@ -1057,6 +1112,25 @@
     if (closeWindow) {
       closeWindow.addEventListener("click", () => send({ type: "window.close" }));
     }
+    const tabStrip = document.querySelector(".tabs");
+    if (tabStrip) {
+      tabStrip.addEventListener("mousedown", (event) => {
+        if (
+          event.button === 0 &&
+          (event.target === tabStrip ||
+            event.target.classList.contains("tabs__items") ||
+            event.target.classList.contains("tabs__spacer"))
+        ) {
+          send({ type: "window.drag" });
+        }
+      });
+      tabStrip.addEventListener("dblclick", (event) => {
+        if (event.target === tabStrip || event.target.classList.contains("tabs__spacer")) {
+          send({ type: "window.max" });
+        }
+      });
+    }
+
     const spacer = document.querySelector(".tabs__spacer");
     if (spacer) {
       spacer.addEventListener("mousedown", (event) => {
@@ -1085,10 +1159,7 @@
         if (!current.url || !/^https?:\/\//.test(current.url)) {
           return;
         }
-        const target =
-          "https://translate.google.com/translate?sl=auto&tl=ru&u=" +
-          encodeURIComponent(current.url);
-        send({ type: "tabs.newUrl", url: target });
+        send({ type: "tabs.newUrl", url: "https://translate.google.com/" });
       });
     }
 

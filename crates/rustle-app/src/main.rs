@@ -92,6 +92,8 @@ enum AppEvent {
     DownloadsChanged,
     DownloadsRestored(Vec<DownloadRecord>),
     BookmarksRestored(Vec<BookmarkEntry>),
+    LoadTimeout(TabId),
+    ContentIpc(TabId, String),
     Vertical(bool),
     Focus,
     NewTab,
@@ -173,7 +175,9 @@ struct AppState {
     dropdown_open: bool,
     dropdown_height: u32,
     bookmark_bar: bool,
+    bookmark_bar_visible: bool,
     bookmarks: Vec<BookmarkEntry>,
+    menu_open: bool,
     find_open: bool,
     permissions: HashMap<String, bool>,
     downloads: Vec<DownloadEntry>,
@@ -211,7 +215,9 @@ impl AppState {
             dropdown_open: false,
             dropdown_height: 360,
             bookmark_bar: false,
+            bookmark_bar_visible: true,
             bookmarks: Vec::new(),
+            menu_open: false,
             find_open: false,
             permissions: HashMap::new(),
             downloads: Vec::new(),
@@ -562,6 +568,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
             "zoom": active.map(|tab| tab.zoom).unwrap_or(1.0),
             "vertical": state.vertical,
             "sidebarCollapsed": state.sidebar_collapsed,
+            "bookmarkBarVisible": state.bookmark_bar && state.bookmark_bar_visible,
             "secure": url.starts_with("https://"),
             "bookmarks": state.bookmarks,
             "settings": {
@@ -668,6 +675,8 @@ fn sync_tab_from_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
 #[cfg(target_os = "windows")]
 #[link(name = "user32")]
 unsafe extern "system" {
+    fn ReleaseCapture() -> i32;
+    fn SendMessageW(hwnd: isize, msg: u32, wparam: isize, lparam: isize) -> isize;
     fn SetWindowPos(
         hwnd: isize,
         insert_after: isize,
@@ -707,6 +716,50 @@ fn raise_chrome(state: &Rc<RefCell<AppState>>) {
     }
 }
 
+fn raise_sidebar(state: &Rc<RefCell<AppState>>) {
+    #[cfg(target_os = "windows")]
+    {
+        const HWND_TOP: isize = 0;
+        const SWP_NOSIZE: u32 = 0x0001;
+        const SWP_NOMOVE: u32 = 0x0002;
+        const SWP_NOACTIVATE: u32 = 0x0010;
+        let hwnd = {
+            let state = state.borrow();
+            state
+                .sidebar
+                .as_ref()
+                .map(|sidebar| sidebar.hwnd().0 as isize)
+        };
+        if let Some(hwnd) = hwnd {
+            unsafe {
+                SetWindowPos(
+                    hwnd,
+                    HWND_TOP,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE,
+                );
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn start_window_drag(window: &Window) {
+    const WM_NCLBUTTONDOWN: u32 = 0x00A1;
+    const HTCAPTION: isize = 2;
+    let hwnd = window.hwnd();
+    unsafe {
+        ReleaseCapture();
+        SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn start_window_drag(_window: &Window) {}
+
 fn apply_layout(state: &Rc<RefCell<AppState>>) {
     let (
         width,
@@ -719,6 +772,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
         find_open,
         vertical,
         sidebar_collapsed,
+        menu_open,
     ) = {
         let state = state.borrow();
         let overlay_mode = state.active_tab().is_some_and(|tab| {
@@ -735,6 +789,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             state.find_open,
             state.vertical,
             state.sidebar_collapsed,
+            state.menu_open,
         )
     };
 
@@ -749,10 +804,12 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
         (dropdown_height + collapsed.saturating_sub(CHROME_COLLAPSED)).clamp(collapsed, height)
     } else if find_open {
         (collapsed + 44).min(height)
+    } else if menu_open {
+        (collapsed + 250).min(height)
     } else {
         collapsed
     };
-    let sidebar_width = if vertical && !overlay_mode {
+    let sidebar_width = if vertical {
         if sidebar_collapsed { 48 } else { 220 }
     } else {
         0
@@ -765,8 +822,8 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             let _ = chrome.set_bounds(rect(0, 0, width, chrome_height));
         }
         if let Some(sidebar) = &state.sidebar {
-            let _ = sidebar.set_visible(vertical && !overlay_mode);
-            if vertical && !overlay_mode {
+            let _ = sidebar.set_visible(vertical);
+            if vertical {
                 let _ = sidebar.set_bounds(rect(
                     0,
                     collapsed,
@@ -797,6 +854,9 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
     }
 
     raise_chrome(state);
+    if vertical {
+        raise_sidebar(state);
+    }
 }
 
 fn focus_address(state: &Rc<RefCell<AppState>>) {
@@ -858,6 +918,12 @@ fn on_navigation(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: String) {
     }
     push_ui_state(state);
     save_session_due(state);
+
+    let proxy = state.borrow().proxy.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(8));
+        let _ = proxy.send_event(AppEvent::LoadTimeout(tab_id));
+    });
 }
 
 fn record_visit(state: &Rc<RefCell<AppState>>, url: &str, title: &str) {
@@ -882,6 +948,9 @@ fn on_title(state: &Rc<RefCell<AppState>>, tab_id: TabId, title: String) {
             None
         } else {
             tab.title = title;
+            if !tab.title.is_empty() {
+                tab.loading = false;
+            }
             Some((tab.url.clone(), tab.title.clone()))
         }
     };
@@ -962,6 +1031,20 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
         .with_new_window_req_handler(move |url, _features| {
             let _ = new_window_proxy.send_event(AppEvent::OpenUrl(url));
             NewWindowResponse::Deny
+        })
+        .with_initialization_script(
+            "window.addEventListener('wheel', function (event) { \
+               if (event.ctrlKey && window.ipc) { \
+                 event.preventDefault(); \
+                 window.ipc.postMessage(JSON.stringify({ type: 'zoom.wheel', delta: event.deltaY })); \
+               } \
+             }, { passive: false });",
+        )
+        .with_ipc_handler({
+            let proxy = proxy.clone();
+            move |request| {
+                let _ = proxy.send_event(AppEvent::ContentIpc(tab_id, request.body().to_owned()));
+            }
         })
         .with_url(&url);
 
@@ -2027,8 +2110,16 @@ fn clear_browsing_data(state: &Rc<RefCell<AppState>>) {
 fn clear_browsing_data(_state: &Rc<RefCell<AppState>>) {}
 
 fn favicon_name(url: &str) -> String {
+    let key = Url::parse(url)
+        .ok()
+        .and_then(|parsed| {
+            parsed
+                .host_str()
+                .map(|host| host.trim_start_matches("www.").to_owned())
+        })
+        .unwrap_or_else(|| url.to_owned());
     let mut hash: u64 = 0xcbf29ce484222325;
-    for byte in url.as_bytes() {
+    for byte in key.as_bytes() {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x100000001b3);
     }
@@ -2107,11 +2198,13 @@ fn install_favicon_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, tab
         unsafe {
             let _ = webview.GetFavicon(COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG, &completed);
         }
+        std::mem::forget(completed);
         Ok(())
     }));
     unsafe {
         let _ = webview15.add_FaviconChanged(&handler, &mut token);
     }
+    std::mem::forget(handler);
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -2758,12 +2851,19 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             {
                 let mut state = state.borrow_mut();
                 state.sidebar_collapsed = !state.sidebar_collapsed;
+                state.settings.sidebar_collapsed = state.sidebar_collapsed;
+                if !state.private {
+                    let _ = rustle_storage::save_settings(&state.settings);
+                }
             }
             apply_layout(state);
             push_ui_state(state);
         }
         Some("sidebar.ready") => push_ui_state(state),
-        Some("window.min") => state.borrow().window.set_minimized(true),
+        Some("window.min") => {
+            let window = state.borrow().window.clone();
+            window.set_minimized(true);
+        }
         Some("window.max") => {
             let window = state.borrow().window.clone();
             if window.is_maximized() {
@@ -2777,7 +2877,7 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
         }
         Some("window.drag") => {
             let window = state.borrow().window.clone();
-            let _ = window.drag_window();
+            start_window_drag(&window);
         }
         Some("zoom.reset") => apply_zoom(state, 1.0),
         Some("tabs.newUrl") => {
@@ -2809,6 +2909,30 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 .and_then(|value| value.as_bool())
                 .unwrap_or(true);
             find_in_page(state, text, forward);
+        }
+        Some("ui.menu") => {
+            let open = message
+                .get("open")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            let changed = {
+                let mut state = state.borrow_mut();
+                let changed = state.menu_open != open;
+                state.menu_open = open;
+                changed
+            };
+            if changed {
+                apply_layout(state);
+            }
+        }
+        Some("ui.bookmarkBarToggle") => {
+            {
+                let mut state = state.borrow_mut();
+                state.bookmark_bar_visible = !state.bookmark_bar_visible;
+                state.bookmark_bar = state.bookmark_bar_visible && !state.bookmarks.is_empty();
+            }
+            apply_layout(state);
+            push_ui_state(state);
         }
         Some("ui.bookmarkBar") => {
             let visible = message
@@ -3235,7 +3359,10 @@ fn main() -> wry::Result<()> {
         state.stress_cycles = stress_cycles;
         state.settings = settings.clone();
         state.private = private;
+        state.vertical = settings.vertical_tabs;
+        state.sidebar_collapsed = settings.sidebar_collapsed;
         state.bookmark_bar = !startup_bookmarks.is_empty();
+        state.bookmark_bar_visible = true;
         state.bookmarks = startup_bookmarks;
         state.storage = if private {
             None
@@ -3256,6 +3383,9 @@ fn main() -> wry::Result<()> {
     mark("content");
 
     create_chrome(&state)?;
+    if state.borrow().vertical {
+        create_sidebar(&state)?;
+    }
     mark("chrome");
 
     save_session_state(&state, false);
@@ -3289,20 +3419,62 @@ fn main() -> wry::Result<()> {
                 }
                 WindowEvent::Resized(size) => {
                     let logical = size.to_logical::<u32>(window.scale_factor());
-                    {
-                        let mut state = state.borrow_mut();
-                        state.width = logical.width;
-                        state.height = logical.height;
+                    if logical.width > 0 && logical.height > 0 {
+                        {
+                            let mut state = state.borrow_mut();
+                            state.width = logical.width;
+                            state.height = logical.height;
+                        }
+                        apply_layout(&state);
                     }
-                    apply_layout(&state);
                 }
                 _ => {}
             },
             Event::UserEvent(AppEvent::OpenUrl(url)) => {
                 open_external_url(&state, &url);
             }
+            Event::UserEvent(AppEvent::ContentIpc(tab_id, body)) => {
+                if let Ok(message) = serde_json::from_str::<Value>(&body) {
+                    if message.get("type").and_then(Value::as_str) == Some("zoom.wheel") {
+                        let delta = message.get("delta").and_then(Value::as_f64).unwrap_or(0.0);
+                        if state.borrow().active == tab_id {
+                            let step = if delta < 0.0 { 0.1 } else { -0.1 };
+                            let factor = state
+                                .borrow()
+                                .tab(tab_id)
+                                .map(|tab| tab.zoom + step)
+                                .unwrap_or(1.0);
+                            apply_zoom(&state, factor);
+                        }
+                    }
+                }
+            }
+            Event::UserEvent(AppEvent::LoadTimeout(tab_id)) => {
+                let changed = {
+                    if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+                        if tab.loading {
+                            tab.loading = false;
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                };
+                if changed {
+                    push_ui_state(&state);
+                }
+            }
             Event::UserEvent(AppEvent::Vertical(enabled)) => {
-                state.borrow_mut().vertical = enabled;
+                {
+                    let mut state_ref = state.borrow_mut();
+                    state_ref.vertical = enabled;
+                    state_ref.settings.vertical_tabs = enabled;
+                    if !state_ref.private {
+                        let _ = rustle_storage::save_settings(&state_ref.settings);
+                    }
+                }
                 if enabled {
                     if state.borrow().sidebar.is_none() {
                         if let Err(error) = create_sidebar(&state) {
@@ -3351,11 +3523,10 @@ fn main() -> wry::Result<()> {
                 push_ui_state(&state);
             }
             Event::UserEvent(AppEvent::BookmarksRestored(items)) => {
-                let visible = !items.is_empty();
                 {
                     let mut state = state.borrow_mut();
+                    state.bookmark_bar = state.bookmark_bar_visible && !items.is_empty();
                     state.bookmarks = items;
-                    state.bookmark_bar = visible;
                 }
                 apply_layout(&state);
                 push_ui_state(&state);

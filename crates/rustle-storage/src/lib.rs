@@ -65,6 +65,10 @@ pub struct Settings {
     pub clear_on_exit: bool,
     #[serde(default = "default_true")]
     pub adblock: bool,
+    #[serde(default)]
+    pub vertical_tabs: bool,
+    #[serde(default)]
+    pub sidebar_collapsed: bool,
 }
 
 fn default_search_engine() -> String {
@@ -93,6 +97,8 @@ impl Default for Settings {
             https_first: false,
             clear_on_exit: false,
             adblock: true,
+            vertical_tabs: false,
+            sidebar_collapsed: false,
         }
     }
 }
