@@ -1129,16 +1129,6 @@
       });
     }
 
-    const spacer = document.querySelector(".tabs__spacer");
-    if (spacer) {
-      spacer.addEventListener("mousedown", (event) => {
-        if (event.button === 0) {
-          send({ type: "window.drag" });
-        }
-      });
-      spacer.addEventListener("dblclick", () => send({ type: "window.max" }));
-    }
-
     const zoomLabel = byId("zoom-label");
     if (zoomLabel) {
       const reset = () => send({ type: "zoom.reset" });
