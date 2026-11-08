@@ -90,7 +90,7 @@ fn default_true() -> bool {
 }
 
 fn default_adblock_exceptions() -> Vec<String> {
-    vec!["hltv.org".to_owned()]
+    vec!["hltv.org".to_owned(), "vk.ru".to_owned()]
 }
 
 impl Default for Settings {

@@ -78,6 +78,7 @@
       (tab.pinned ? " sidebar-tab--pinned" : "") +
       (tab.id === current.activeId ? " sidebar-tab--active" : "");
     row.dataset.id = String(tab.id);
+    row.draggable = true;
     row.title = tab.title || tab.url;
 
     const favicon = makeFavicon(tab);
@@ -111,6 +112,28 @@
       }
     });
     row.addEventListener("contextmenu", (event) => openMenu(event, "tab", { id: tab.id }));
+    row.addEventListener("dragstart", (event) => {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(tab.id));
+      row.classList.add("sidebar-tab--dragging");
+    });
+    row.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      row.classList.add("sidebar-tab--drop");
+    });
+    row.addEventListener("dragleave", () => row.classList.remove("sidebar-tab--drop"));
+    row.addEventListener("drop", (event) => {
+      event.preventDefault();
+      row.classList.remove("sidebar-tab--drop");
+      const target = Number(event.dataTransfer.getData("text/plain"));
+      if (target && target !== tab.id) {
+        send({ type: "tabs.move", id: target, target: tab.id });
+      }
+    });
+    row.addEventListener("dragend", () => {
+      row.classList.remove("sidebar-tab--dragging");
+      document.querySelectorAll(".sidebar-tab--drop").forEach((node) => node.classList.remove("sidebar-tab--drop"));
+    });
     return row;
   };
 

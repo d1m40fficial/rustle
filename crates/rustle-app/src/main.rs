@@ -88,7 +88,7 @@ const MAX_CLOSED_TABS: usize = 25;
 fn webview_browser_args() -> String {
     format!(
         "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
-         --webview-exe-name=Rustle --webview-exe-version={VERSION}"
+         --webview-exe-name=Rustle --webview-exe-version={VERSION} --app-user-model-id=Rustle"
     )
 }
 
@@ -118,6 +118,7 @@ enum AppEvent {
     RemoveGroup(u64),
     NewTabInGroup(u64),
     MoveTabGroup { tab: TabId, group: Option<u64> },
+    MoveTab { tab: TabId, target: TabId },
     LayoutTick,
     Focus,
     NewTab,
@@ -2322,6 +2323,28 @@ fn new_tab_in_group(state: &Rc<RefCell<AppState>>, group_id: u64) {
     focus_address(state);
 }
 
+fn move_tab(state: &Rc<RefCell<AppState>>, tab_id: TabId, target_id: TabId) {
+    if tab_id == target_id {
+        return;
+    }
+    {
+        let mut state = state.borrow_mut();
+        let Some(from) = state.tab_index(tab_id) else {
+            return;
+        };
+        let tab = state.tabs.remove(from);
+        let Some(to) = state.tab_index(target_id) else {
+            let position = from.min(state.tabs.len());
+            state.tabs.insert(position, tab);
+            return;
+        };
+        state.tabs.insert(to, tab);
+        state.tabs.sort_by_key(|entry| !entry.pinned);
+    }
+    push_ui_state(state);
+    save_session_due(state);
+}
+
 fn move_tab_to_group(state: &Rc<RefCell<AppState>>, tab_id: TabId, group_id: Option<u64>) {
     let changed = {
         let mut state = state.borrow_mut();
@@ -3920,6 +3943,17 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 let _ = state.borrow().proxy.send_event(AppEvent::NewTabInGroup(id));
             }
         }
+        Some("tabs.move") => {
+            if let (Some(tab), Some(target)) = (
+                message.get("id").and_then(|value| value.as_u64()),
+                message.get("target").and_then(|value| value.as_u64()),
+            ) {
+                let _ = state.borrow().proxy.send_event(AppEvent::MoveTab {
+                    tab: TabId(tab),
+                    target: TabId(target),
+                });
+            }
+        }
         Some("tabs.moveGroup") => {
             if let Some(tab) = message.get("id").and_then(|value| value.as_u64()) {
                 let group = message.get("groupId").and_then(|value| value.as_u64());
@@ -4796,6 +4830,9 @@ fn main() -> wry::Result<()> {
             }
             Event::UserEvent(AppEvent::NewTabInGroup(group_id)) => {
                 new_tab_in_group(&state, group_id);
+            }
+            Event::UserEvent(AppEvent::MoveTab { tab, target }) => {
+                move_tab(&state, tab, target);
             }
             Event::UserEvent(AppEvent::MoveTabGroup { tab, group }) => {
                 move_tab_to_group(&state, tab, group);

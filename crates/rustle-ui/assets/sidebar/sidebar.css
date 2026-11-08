@@ -51,7 +51,7 @@ body {
 
 .sidebar-head {
   display: flex;
-  flex: 0 0 48px;
+  flex: 0 0 44px;
   align-items: center;
   justify-content: space-between;
   padding: 0 14px 0 18px;
@@ -633,4 +633,13 @@ body.collapsed .tab-group__toggle {
 
 body.collapsed .tab-group__favicons {
   display: none;
+}
+
+.sidebar-tab--dragging {
+  opacity: 0.4;
+}
+
+.sidebar-tab--drop {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
 }

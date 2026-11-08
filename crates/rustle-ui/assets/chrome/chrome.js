@@ -183,6 +183,9 @@
     chip.title = group.name;
     chip.style.setProperty("--group-hue", groupHue(group.id));
 
+    const dot = document.createElement("span");
+    dot.className = "tab-group__dot";
+
     const arrow = document.createElement("span");
     arrow.className = "tab-group__arrow";
     arrow.textContent = group.collapsed ? "›" : "⌄";
@@ -192,7 +195,7 @@
     name.textContent = group.name;
 
 
-    chip.append(arrow, name);
+    chip.append(dot, arrow, name);
 
     const add = document.createElement("button");
     add.type = "button";
@@ -213,6 +216,7 @@
       (tab.id === activeId ? " tab--active" : "") +
       (tab.loading ? " tab--loading" : "");
     element.dataset.id = String(tab.id);
+    element.draggable = true;
     element.setAttribute("role", "tab");
     element.setAttribute("aria-selected", String(tab.id === activeId));
     element.tabIndex = tab.id === activeId ? 0 : -1;
@@ -237,6 +241,29 @@
     close.textContent = "×";
 
     element.append(favicon, spinner, title, close);
+    element.addEventListener("dragstart", (event) => {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(tab.id));
+      element.classList.add("tab--dragging");
+    });
+    element.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      element.classList.add("tab--drop");
+    });
+    element.addEventListener("dragleave", () => element.classList.remove("tab--drop"));
+    element.addEventListener("drop", (event) => {
+      event.preventDefault();
+      element.classList.remove("tab--drop");
+      const target = Number(event.dataTransfer.getData("text/plain"));
+      if (target && target !== tab.id) {
+        send({ type: "tabs.move", id: target, target: tab.id });
+      }
+    });
+    element.addEventListener("dragend", () => {
+      element.classList.remove("tab--dragging");
+      document.querySelectorAll(".tab--drop").forEach((node) => node.classList.remove("tab--drop"));
+    });
     return element;
   };
 
@@ -1505,6 +1532,10 @@
           httpsFirst: byId("setting-https").checked,
           clearOnExit: byId("setting-clear-exit").checked,
           adblock: byId("setting-adblock").checked,
+            adblockExceptions: (byId("setting-adblock-exceptions")?.value || "")
+              .split(/[,\n]+/)
+              .map((entry) => entry.trim())
+              .filter(Boolean),
         });
         byId("settings-status").textContent = "Сохранено";
       });
@@ -1703,6 +1734,23 @@
     if (closeWindow) {
       closeWindow.addEventListener("click", () => send({ type: "window.close" }));
     }
+    const toolbar = document.querySelector(".toolbar");
+    if (toolbar) {
+      toolbar.addEventListener("mousedown", (event) => {
+        if (
+          event.button === 0 &&
+          !event.target.closest("button, input, .address, [role='button']")
+        ) {
+          send({ type: "window.drag" });
+        }
+      });
+      toolbar.addEventListener("dblclick", (event) => {
+        if (!event.target.closest("button, input, .address, [role='button']")) {
+          send({ type: "window.max" });
+        }
+      });
+    }
+
     const tabStrip = document.querySelector(".tabs");
     if (tabStrip) {
       tabStrip.addEventListener("mousedown", (event) => {
