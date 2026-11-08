@@ -1275,7 +1275,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             let sidebar_visible = sidebar_visible && !prompt_open;
             let _ = sidebar.set_visible(sidebar_visible);
             if sidebar_visible {
-                let _ = sidebar.set_bounds(rect(0, top, sidebar_width, height.saturating_sub(top)));
+                let _ = sidebar.set_bounds(rect(0, 0, sidebar_width, height));
             }
         }
 
@@ -4342,12 +4342,7 @@ fn create_sidebar(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
         .expect("WebContext must exist while creating sidebar");
     let ipc_state = Rc::clone(state);
     let result = WebViewBuilder::new_with_web_context(&mut context)
-        .with_bounds(rect(
-            0,
-            CHROME_VERTICAL,
-            SIDEBAR_WIDTH,
-            height.saturating_sub(CHROME_VERTICAL),
-        ))
+        .with_bounds(rect(0, 0, SIDEBAR_WIDTH, height))
         .with_browser_accelerator_keys(false)
         .with_additional_browser_args(webview_browser_args())
         .with_custom_protocol("rustle".into(), protocol_handler)
@@ -4362,12 +4357,7 @@ fn create_sidebar(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
         if let Some(sidebar) = &state_ref.sidebar {
             install_accelerators_for_view(state, sidebar);
             let _ = sidebar.set_visible(true);
-            let _ = sidebar.set_bounds(rect(
-                0,
-                CHROME_VERTICAL,
-                SIDEBAR_WIDTH,
-                height.saturating_sub(CHROME_VERTICAL),
-            ));
+            let _ = sidebar.set_bounds(rect(0, 0, SIDEBAR_WIDTH, height));
         }
     }
     apply_layout(state);

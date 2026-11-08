@@ -217,7 +217,7 @@ input:focus-visible,
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 104px 0 var(--toolbar-nav-left, 72px);
+  padding: 0 max(104px, var(--toolbar-nav-left, 72px)) 0 var(--toolbar-nav-left, 72px);
   background: var(--bg-elevated);
 }
 
@@ -1583,4 +1583,8 @@ html.vertical-mode .prompt-overlay {
   font-size: 0.46rem;
   border: 1px solid var(--border);
   border-radius: 999px;
+}
+
+.address {
+  max-width: 760px;
 }

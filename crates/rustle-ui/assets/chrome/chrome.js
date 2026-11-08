@@ -187,22 +187,12 @@
     arrow.className = "tab-group__arrow";
     arrow.textContent = group.collapsed ? "›" : "⌄";
 
-    const dot = document.createElement("span");
-    dot.className = "tab-group__dot";
-
     const name = document.createElement("span");
     name.className = "tab-group__name";
     name.textContent = group.name;
 
 
-    if (group.collapsed) {
-      const count = document.createElement("span");
-      count.className = "tab-group__count";
-      count.textContent = String(children.length);
-      chip.append(arrow, dot, name, count);
-    } else {
-      chip.append(arrow, dot, name);
-    }
+    chip.append(arrow, name);
 
     const add = document.createElement("button");
     add.type = "button";
