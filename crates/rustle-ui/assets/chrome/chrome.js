@@ -673,11 +673,11 @@
   remove.textContent = "×";
   remove.addEventListener("click", async (event) => {
     event.stopPropagation();
-    if (item.bookmark && item.bookmarkId) {
+    if (item.bookmark) {
       try {
-        await request("bookmarks.remove", { entryId: item.bookmarkId });
+        await request("bookmarks.toggle", { url: item.url, title: item.title });
         current.bookmarks = (current.bookmarks || []).filter(
-          (entry) => entry.id !== item.bookmarkId,
+          (entry) => entry.url !== item.url,
         );
       } catch (error) {
         console.warn(error);
