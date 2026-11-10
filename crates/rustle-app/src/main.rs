@@ -31,7 +31,7 @@ use tao::{
     dpi::LogicalSize as TaoLogicalSize,
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
-    window::{Fullscreen, Window, WindowBuilder},
+    window::{Fullscreen, Icon, Window, WindowBuilder},
 };
 use url::Url;
 use wry::{
@@ -85,6 +85,11 @@ const MAX_CLOSED_TABS: usize = 25;
 
 /// WebView2 uses these switches to label its process tree in Task Manager.
 /// Without them Windows shows the generic "WebView2 Manager" name.
+fn app_icon() -> Icon {
+    let image = include_bytes!("../assets/rustle-icon.rgba");
+    Icon::from_rgba(image.to_vec(), 256, 256).expect("valid application icon")
+}
+
 fn webview_browser_args() -> String {
     format!(
         "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
@@ -4635,6 +4640,7 @@ fn main() -> wry::Result<()> {
     let window = Rc::new(
         WindowBuilder::new()
             .with_title("Rustle")
+            .with_window_icon(Some(app_icon()))
             .with_inner_size(TaoLogicalSize::new(1280.0, 800.0))
             .with_min_inner_size(TaoLogicalSize::new(720.0, 480.0))
             .with_decorations(false)
