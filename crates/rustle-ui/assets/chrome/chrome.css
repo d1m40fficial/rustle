@@ -1495,6 +1495,85 @@ html.vertical-mode.overlay-mode .error-view {
 }
 
 
+.switcher-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(3px);
+}
+
+.switcher-overlay[hidden] { display: none; }
+
+.switcher {
+  width: min(620px, 100%);
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.42);
+}
+
+.switcher__input {
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.switcher__input:focus { border-color: var(--accent); }
+
+.switcher__list {
+  max-height: 360px;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+
+.switcher__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.switcher__item:hover, .switcher__item.is-active {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.switcher__item img, .switcher__item .switcher__mark {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border-radius: 50%;
+  object-fit: contain;
+}
+
+.switcher__mark {
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  font-size: 9px;
+}
+
+.switcher__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.switcher__url { color: var(--faint); font-size: 0.8rem; }
 .prompt-overlay {
   position: fixed;
   inset: 0;
@@ -1549,7 +1628,86 @@ html.vertical-mode.overlay-mode .error-view {
   margin-top: 14px;
 }
 
-html.vertical-mode .prompt-overlay {
+html.vertical-mode .switcher-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(3px);
+}
+
+.switcher-overlay[hidden] { display: none; }
+
+.switcher {
+  width: min(620px, 100%);
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.42);
+}
+
+.switcher__input {
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.switcher__input:focus { border-color: var(--accent); }
+
+.switcher__list {
+  max-height: 360px;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+
+.switcher__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.switcher__item:hover, .switcher__item.is-active {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.switcher__item img, .switcher__item .switcher__mark {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border-radius: 50%;
+  object-fit: contain;
+}
+
+.switcher__mark {
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  font-size: 9px;
+}
+
+.switcher__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.switcher__url { color: var(--faint); font-size: 0.8rem; }
+.prompt-overlay {
   padding-left: calc(var(--sidebar-width, 282px) + 24px);
 }
 
@@ -1575,6 +1733,33 @@ html.vertical-mode .prompt-overlay {
   border-color: var(--accent);
 }
 
+.recovery-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.34);
+  font-size: 12px;
+}
+
+.recovery-banner[hidden] { display: none; }
+
+.recovery-banner button {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 16px;
+}
 .tab--compact {
   flex: 0 0 30px;
   width: 30px;

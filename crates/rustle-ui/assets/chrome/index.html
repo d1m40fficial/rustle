@@ -59,6 +59,10 @@
     <span class="tabs__spacer"></span>
   </div>
 
+  <div class="recovery-banner" id="recovery-banner" hidden>
+    <span>Сессия восстановлена после сбоя</span>
+    <button type="button" id="recovery-close" aria-label="Закрыть">×</button>
+  </div>
   <div class="find-bar" id="find-bar" hidden>
     <input id="find-input" class="find-bar__input" type="search" placeholder="Найти на странице" autocomplete="off">
     <button id="find-prev" class="find-bar__button" type="button" title="Предыдущее">↑</button>
@@ -85,7 +89,7 @@
     <div class="newtab">
       <img class="newtab__logo" src="logo.png" alt="Rustle">
         <div class="newtab__brand">Rustle</div>
-      <p class="newtab__tagline">Минималистичный браузер. 0.2.0.</p>
+      <p class="newtab__tagline">Минималистичный браузер. 0.3.0.</p>
 
       <form class="newtab__search" id="newtab-search" role="search">
         <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
@@ -98,7 +102,7 @@
         <button class="newtab__add newtab__edit" id="newtab-edit" type="button">✎ Редактировать плитки</button>
       </div>
 
-      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.2.0</span></p>
+      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.3.0</span></p>
     </div>
   </section>
 
@@ -178,7 +182,17 @@
           <option value="light">Светлая</option>
         </select>
       </label>
-              <label class="settings__row">
+                      <label class="settings__row">
+          <span>
+            <strong>Язык интерфейса</strong>
+            <small>Русский или English.</small>
+          </span>
+          <select id="setting-language">
+            <option value="ru">Русский</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+<label class="settings__row">
           <span>
             <strong>Ширина боковой панели</strong>
             <small id="setting-sidebar-width-label">282 px</small>
@@ -223,6 +237,13 @@
         </span>
         <textarea class="settings__exceptions" id="setting-adblock-exceptions" rows="2" placeholder="hltv.org"></textarea>
       </label>
+      <label class="settings__row settings__row--stack">
+        <span>
+          <strong>Свои правила Adblock</strong>
+          <small>По одному правилу на строку. Поддерживаются домены, ||домен^ и @@исключения.</small>
+        </span>
+        <textarea class="settings__exceptions" id="setting-adblock-rules" rows="3" placeholder="||ads.example.com^"></textarea>
+      </label>
       <label class="settings__row">
         <span>
           <strong>Очищать при выходе</strong>
@@ -233,6 +254,8 @@
       <div class="settings__actions">
         <button class="button button--primary" type="submit">Сохранить</button>
         <button id="clear-data" class="button" type="button">Очистить cookies и кэш</button>
+          <button id="settings-export" class="button" type="button">Экспорт настроек</button>
+          <button id="settings-import" class="button" type="button">Импорт настроек</button>
         <span id="settings-status" class="settings__status"></span>
       </div>
     </form>
@@ -276,6 +299,12 @@
     <div id="downloads-list" class="page-list" aria-live="polite"></div>
   </section>
 
+  <div class="switcher-overlay" id="switcher-overlay" hidden>
+    <div class="switcher" role="dialog" aria-modal="true">
+      <input class="switcher__input" id="switcher-input" type="text" placeholder="Поиск по вкладкам…" autocomplete="off">
+      <div class="switcher__list" id="switcher-list"></div>
+    </div>
+  </div>
   <div class="prompt-overlay" id="prompt-overlay" hidden>
     <div class="prompt-card" role="dialog" aria-modal="true">
       <p class="prompt-title" id="prompt-title">Название группы</p>

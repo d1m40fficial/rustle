@@ -57,6 +57,8 @@ pub struct Settings {
     pub search_engine: String,
     #[serde(default = "default_theme")]
     pub theme: String,
+    #[serde(default = "default_language")]
+    pub language: String,
     #[serde(default = "default_startup")]
     pub startup: String,
     #[serde(default)]
@@ -73,6 +75,8 @@ pub struct Settings {
     pub sidebar_width: u32,
     #[serde(default = "default_adblock_exceptions")]
     pub adblock_exceptions: Vec<String>,
+    #[serde(default)]
+    pub adblock_custom_rules: Vec<String>,
 }
 
 fn default_search_engine() -> String {
@@ -81,6 +85,10 @@ fn default_search_engine() -> String {
 
 fn default_theme() -> String {
     "system".to_owned()
+}
+
+fn default_language() -> String {
+    "ru".to_owned()
 }
 
 fn default_startup() -> String {
@@ -95,6 +103,10 @@ fn default_sidebar_width() -> u32 {
     282
 }
 
+fn default_group_hue() -> u16 {
+    24
+}
+
 fn default_adblock_exceptions() -> Vec<String> {
     vec!["hltv.org".to_owned(), "vk.ru".to_owned()]
 }
@@ -105,6 +117,7 @@ impl Default for Settings {
             version: SETTINGS_VERSION,
             search_engine: default_search_engine(),
             theme: default_theme(),
+            language: default_language(),
             startup: default_startup(),
             https_first: false,
             clear_on_exit: false,
@@ -113,6 +126,7 @@ impl Default for Settings {
             sidebar_collapsed: false,
             sidebar_width: default_sidebar_width(),
             adblock_exceptions: default_adblock_exceptions(),
+            adblock_custom_rules: Vec::new(),
         }
     }
 }
@@ -129,6 +143,8 @@ pub struct SessionTab {
     pub pinned: bool,
     #[serde(default)]
     pub muted: bool,
+    #[serde(default)]
+    pub container: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +153,8 @@ pub struct SessionGroup {
     pub name: String,
     #[serde(default)]
     pub collapsed: bool,
+    #[serde(default = "default_group_hue")]
+    pub hue: u16,
 }
 
 /// Browser session file.

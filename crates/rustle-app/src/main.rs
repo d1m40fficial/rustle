@@ -52,8 +52,9 @@ use webview2_com::{
     Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED, COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS,
         COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED, COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG,
-        ICoreWebView2_4, ICoreWebView2_8, ICoreWebView2_13, ICoreWebView2_15,
-        ICoreWebView2DownloadOperation, ICoreWebView2Profile2,
+        ICoreWebView2_4, ICoreWebView2_7, ICoreWebView2_8, ICoreWebView2_13, ICoreWebView2_15,
+        ICoreWebView2DownloadOperation, ICoreWebView2PrintToPdfCompletedHandler,
+        ICoreWebView2Profile2,
     },
     StateChangedEventHandler, WebResourceRequestedEventHandler, ZoomFactorChangedEventHandler,
 };
@@ -118,6 +119,7 @@ enum AppEvent {
     FaviconFetched(TabId, String, Vec<u8>),
     TileFavicons { request_id: u64, items: Value },
     AdblockReady(adblock::AdblockEvent),
+    Autosave,
     Vertical(bool),
     CreateGroup { name: String, tab: Option<TabId> },
     ToggleGroup(u64),
@@ -153,6 +155,7 @@ struct Tab {
     group: Option<u64>,
     pinned: bool,
     muted: bool,
+    container: Option<String>,
     blocked: u64,
     cosmetic_generic: bool,
     cosmetic_exceptions: HashSet<String>,
@@ -164,6 +167,7 @@ struct TabGroup {
     id: u64,
     name: String,
     collapsed: bool,
+    hue: u16,
 }
 
 impl Tab {
@@ -185,6 +189,7 @@ impl Tab {
             group: None,
             pinned: false,
             muted: false,
+            container: None,
             blocked: 0,
             cosmetic_generic: true,
             cosmetic_exceptions: HashSet::new(),
@@ -243,6 +248,8 @@ struct AppState {
     adblock_engine: Option<adblock::FilterEngine>,
     adblock_info: adblock::AdblockInfo,
     prompt_open: bool,
+    switcher_open: bool,
+    recovered: bool,
 }
 
 struct LayoutAnimation {
@@ -294,6 +301,8 @@ impl AppState {
             adblock_engine: None,
             adblock_info: adblock::AdblockInfo::default(),
             prompt_open: false,
+            switcher_open: false,
+            recovered: false,
         }
     }
 
@@ -494,6 +503,7 @@ fn save_session_state(state: &Rc<RefCell<AppState>>, clean_exit: bool) {
                     group: tab.group,
                     pinned: tab.pinned,
                     muted: tab.muted,
+                    container: tab.container.clone(),
                 })
                 .collect(),
             closed: state
@@ -505,6 +515,7 @@ fn save_session_state(state: &Rc<RefCell<AppState>>, clean_exit: bool) {
                     group: None,
                     pinned: false,
                     muted: false,
+                    container: None,
                 })
                 .collect(),
             groups: state
@@ -514,6 +525,7 @@ fn save_session_state(state: &Rc<RefCell<AppState>>, clean_exit: bool) {
                     id: group.id,
                     name: group.name.clone(),
                     collapsed: group.collapsed,
+                    hue: group.hue,
                 })
                 .collect(),
         }
@@ -545,6 +557,7 @@ fn restore_session(state: &Rc<RefCell<AppState>>, session: Option<Session>) {
             id: group.id,
             name: group.name,
             collapsed: group.collapsed,
+            hue: group.hue,
         })
         .collect();
     state.next_group_id = state.groups.iter().map(|g| g.id).max().unwrap_or(0) + 1;
@@ -571,6 +584,7 @@ fn restore_session(state: &Rc<RefCell<AppState>>, session: Option<Session>) {
                 entry.favicon = favicon;
                 entry.pinned = tab.pinned;
                 entry.muted = tab.muted;
+                entry.container = tab.container;
                 entry.group = if tab.pinned { None } else { group };
             }
         }
@@ -628,6 +642,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                     "groupId": tab.group,
                     "pinned": tab.pinned,
                     "muted": tab.muted,
+                    "container": tab.container,
                     "blocked": tab.blocked,
                     "error": tab.error.clone(),
                 })
@@ -692,12 +707,15 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
             "vertical": state.vertical,
             "sidebarCollapsed": state.sidebar_collapsed,
             "sidebarWidth": state.settings.sidebar_width.clamp(72, SIDEBAR_WIDTH),
+            "switcherOpen": state.switcher_open,
+            "recovered": state.recovered,
             "groups": state.groups.iter().map(|group| json!({"id": group.id, "name": group.name, "collapsed": group.collapsed})).collect::<Vec<_>>(),
             "secure": url.starts_with("https://"),
             "bookmarks": state.bookmarks,
             "settings": {
                 "searchEngine": state.settings.search_engine,
                 "theme": state.settings.theme,
+                "language": state.settings.language,
                 "startup": state.settings.startup,
                 "httpsFirst": state.settings.https_first,
                 "clearOnExit": state.settings.clear_on_exit,
@@ -962,6 +980,9 @@ mod native_menu {
         push(items, "app.newtab", "Новая вкладка");
         push(items, "app.reopen", "Вернуть закрытую вкладку");
         separator(items);
+        push(items, "app.session.save", "Сохранить сессию…");
+        push(items, "app.session.open", "Открыть сессию…");
+        push(items, "app.autogroup", "Сгруппировать по доменам");
         push(items, "app.history", "История");
         push(items, "app.bookmarks", "Закладки");
         push(items, "app.downloads", "Загрузки");
@@ -971,6 +992,9 @@ mod native_menu {
             .is_some_and(|tab| tab.url.starts_with("http"))
         {
             push(items, "app.bookmark", "Добавить в закладки");
+            push(items, "app.whitelist", "Отключить Adblock на этом сайте");
+            push(items, "app.pdf", "Сохранить страницу в PDF…");
+            push(items, "app.screenshot", "Скриншот страницы…");
         }
         separator(items);
         push_checked(
@@ -1011,6 +1035,20 @@ mod native_menu {
                                 "Закрепить вкладку",
                             );
                         }
+                        for (container, label) in [
+                            (None, "Без контейнера"),
+                            (Some("personal"), "Личный"),
+                            (Some("work"), "Рабочий"),
+                            (Some("bank"), "Банк"),
+                        ] {
+                            push_checked(
+                                &mut entries,
+                                &format!("tab.container:{}:{}", id.0, container.unwrap_or("none")),
+                                label,
+                                tab.container.as_deref() == container,
+                            );
+                        }
+                        separator(&mut entries);
                         push_checked(
                             &mut entries,
                             &format!("tab.mute:{}", id.0),
@@ -1070,6 +1108,11 @@ mod native_menu {
                             &mut entries,
                             &format!("group.newtab:{group_id}"),
                             "Новая вкладка в группе",
+                        );
+                        push(
+                            &mut entries,
+                            &format!("group.color:{group_id}"),
+                            "Сменить цвет группы",
                         );
                         push(
                             &mut entries,
@@ -1230,6 +1273,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
         sidebar_collapsed,
         sidebar_width_setting,
         prompt_open,
+        switcher_open,
     ) = {
         let state = state.borrow();
         let overlay_mode = state.active_tab().is_some_and(|tab| {
@@ -1247,6 +1291,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             state.sidebar_collapsed,
             state.settings.sidebar_width.clamp(72, SIDEBAR_WIDTH),
             state.prompt_open,
+            state.switcher_open,
         )
     };
 
@@ -1281,7 +1326,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             (target_top, target_side, vertical, false)
         }
     };
-    let chrome_height = if overlay_mode || prompt_open {
+    let chrome_height = if overlay_mode || prompt_open || switcher_open {
         height
     } else if dropdown_open {
         (dropdown_height + top.saturating_sub(CHROME_COLLAPSED)).clamp(top, height)
@@ -1298,7 +1343,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             let _ = chrome.set_bounds(rect(0, 0, width, chrome_height));
         }
         if let Some(sidebar) = &state.sidebar {
-            let sidebar_visible = sidebar_visible && !prompt_open;
+            let sidebar_visible = sidebar_visible && !prompt_open && !switcher_open;
             let _ = sidebar.set_visible(sidebar_visible);
             if sidebar_visible {
                 let _ = sidebar.set_bounds(rect(0, 0, sidebar_width, height));
@@ -1326,7 +1371,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
     }
 
     raise_chrome(state);
-    if sidebar_visible && !prompt_open {
+    if sidebar_visible && !prompt_open && !switcher_open {
         raise_sidebar(state);
     }
     if animation_finished {
@@ -1477,7 +1522,7 @@ fn on_page_load(state: &Rc<RefCell<AppState>>, tab_id: TabId, event: PageLoadEve
 }
 
 fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
-    let (url, visible, width, height, top, window, proxy) = {
+    let (url, visible, width, height, top, window, proxy, container) = {
         let state = state.borrow();
         let Some(tab) = state.tab(tab_id) else {
             return;
@@ -1497,6 +1542,7 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
             },
             state.window.clone(),
             state.proxy.clone(),
+            tab.container.clone(),
         )
     };
 
@@ -1587,6 +1633,12 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
         })
         .with_url(&url);
 
+    #[cfg(target_os = "windows")]
+    let builder = if let Some(container) = container.as_deref() {
+        builder.with_profile_name(format!("rustle-{container}"))
+    } else {
+        builder
+    };
     let result = builder.build_as_child(window.as_ref());
     state.borrow_mut().context = Some(context);
 
@@ -2262,6 +2314,7 @@ fn create_group(state: &Rc<RefCell<AppState>>, name: String, tab: Option<TabId>)
         state.next_group_id += 1;
         state.groups.push(TabGroup {
             id,
+            hue: ((id.wrapping_mul(47)) % 360) as u16,
             name: if name.trim().is_empty() {
                 "Группа".to_owned()
             } else {
@@ -2374,6 +2427,328 @@ fn new_tab_in_group(state: &Rc<RefCell<AppState>>, group_id: u64) {
     };
     activate_tab(state, id);
     focus_address(state);
+}
+
+fn save_session_as(state: &Rc<RefCell<AppState>>) {
+    save_session_state(state, false);
+    let Some(target) = rfd::FileDialog::new()
+        .set_title("Сохранить сессию Rustle")
+        .add_filter("Rustle session", &["json"])
+        .set_file_name("rustle-session.json")
+        .save_file()
+    else {
+        return;
+    };
+    let _ = fs::copy(rustle_storage::session_path(), target);
+}
+
+fn open_session_as(state: &Rc<RefCell<AppState>>) {
+    let Some(source) = rfd::FileDialog::new()
+        .set_title("Открыть сессию Rustle")
+        .add_filter("Rustle session", &["json"])
+        .pick_file()
+    else {
+        return;
+    };
+    let Ok(text) = fs::read(source) else {
+        return;
+    };
+    let Ok(session) = serde_json::from_slice::<Session>(&text) else {
+        return;
+    };
+    {
+        let mut state_ref = state.borrow_mut();
+        state_ref.tabs.clear();
+        state_ref.closed.clear();
+        state_ref.groups.clear();
+        state_ref.active = TabId(0);
+    }
+    restore_session(state, Some(session));
+    let active = state.borrow().active;
+    ensure_tab_webview(state, active);
+    apply_layout(state);
+    push_ui_state(state);
+}
+
+fn screenshot_window(state: &Rc<RefCell<AppState>>) {
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Сохранить скриншот")
+        .add_filter("PNG", &["png"])
+        .set_file_name("rustle-screenshot.png")
+        .save_file()
+    else {
+        return;
+    };
+    let hwnd = state.borrow().window.hwnd();
+    let escaped = path.to_string_lossy().replace('\'', "''");
+    let script = format!(
+        "$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.Drawing; Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class W {{ [StructLayout(LayoutKind.Sequential)] public struct R {{ public int L,T,Ri,B; }} [DllImport(\"user32.dll\")] public static extern bool GetWindowRect(IntPtr h, out R r); }}'; $r=New-Object W+R; [W]::GetWindowRect([IntPtr]{hwnd},[ref]$r)|Out-Null; $w=$r.Ri-$r.L; $h=$r.B-$r.T; if($w -le 0 -or $h -le 0){{exit}}; $bmp=New-Object System.Drawing.Bitmap $w,$h; $g=[System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($r.L,$r.T,0,0,(New-Object System.Drawing.Size $w,$h)); $bmp.Save('{escaped}',[System.Drawing.Imaging.ImageFormat]::Png); $g.Dispose(); $bmp.Dispose()"
+    );
+    let _ = ProcessCommand::new("powershell")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script])
+        .spawn();
+}
+
+fn print_active_pdf(state: &Rc<RefCell<AppState>>) {
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Сохранить страницу в PDF")
+        .add_filter("PDF", &["pdf"])
+        .set_file_name("rustle-page.pdf")
+        .save_file()
+    else {
+        return;
+    };
+    let Some(webview) = state
+        .borrow()
+        .active_tab()
+        .and_then(|tab| tab.webview.as_ref().map(|view| view.webview()))
+    else {
+        return;
+    };
+    #[cfg(target_os = "windows")]
+    if let Ok(pdf) = webview.cast::<ICoreWebView2_7>() {
+        let wide: Vec<u16> = path
+            .to_string_lossy()
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        unsafe {
+            let _ = pdf.PrintToPdf(
+                PCWSTR(wide.as_ptr()),
+                None,
+                None::<&ICoreWebView2PrintToPdfCompletedHandler>,
+            );
+        }
+    }
+}
+
+fn whitelist_current(state: &Rc<RefCell<AppState>>) {
+    let host = state
+        .borrow()
+        .active_tab()
+        .and_then(|tab| Url::parse(&tab.url).ok())
+        .and_then(|url| url.host_str().map(str::to_lowercase));
+    let Some(host) = host else {
+        return;
+    };
+    {
+        let mut state_ref = state.borrow_mut();
+        if !state_ref
+            .settings
+            .adblock_exceptions
+            .iter()
+            .any(|entry| entry == &host)
+        {
+            state_ref.settings.adblock_exceptions.push(host);
+        }
+        if !state_ref.private {
+            let _ = rustle_storage::save_settings(&state_ref.settings);
+        }
+    }
+    push_ui_state(state);
+    reload_active(state);
+}
+
+fn export_config(state: &Rc<RefCell<AppState>>) {
+    let (settings, groups) = {
+        let state = state.borrow();
+        (
+            state.settings.clone(),
+            state.groups.iter().map(|group| {
+                json!({"id": group.id, "name": group.name, "collapsed": group.collapsed, "hue": group.hue})
+            }).collect::<Vec<_>>(),
+        )
+    };
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Экспорт настроек Rustle")
+        .add_filter("JSON", &["json"])
+        .set_file_name("rustle-settings.json")
+        .save_file()
+    else {
+        return;
+    };
+    let payload = json!({"version": 1, "settings": settings, "groups": groups});
+    if let Ok(text) = serde_json::to_string_pretty(&payload) {
+        let _ = fs::write(path, text);
+    }
+}
+
+fn import_config(state: &Rc<RefCell<AppState>>) {
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Импорт настроек Rustle")
+        .add_filter("JSON", &["json"])
+        .pick_file()
+    else {
+        return;
+    };
+    let Ok(text) = fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&text) else {
+        return;
+    };
+    if let Some(settings) = value
+        .get("settings")
+        .and_then(|value| serde_json::from_value::<Settings>(value.clone()).ok())
+    {
+        if !state.borrow().private {
+            let _ = rustle_storage::save_settings(&settings);
+        }
+        state.borrow_mut().settings = settings;
+    }
+    if let Some(groups) = value.get("groups").and_then(|value| value.as_array()) {
+        let mut state = state.borrow_mut();
+        state.groups = groups
+            .iter()
+            .filter_map(|group| {
+                Some(TabGroup {
+                    id: group.get("id")?.as_u64()?,
+                    name: group.get("name")?.as_str()?.to_owned(),
+                    collapsed: group
+                        .get("collapsed")
+                        .and_then(|value| value.as_bool())
+                        .unwrap_or(false),
+                    hue: group
+                        .get("hue")
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(24) as u16,
+                })
+            })
+            .collect();
+        state.next_group_id = state.groups.iter().map(|group| group.id).max().unwrap_or(0) + 1;
+    }
+    apply_layout(state);
+    push_ui_state(state);
+}
+
+fn toggle_all_groups(state: &Rc<RefCell<AppState>>) {
+    {
+        let mut state = state.borrow_mut();
+        if state.groups.is_empty() {
+            return;
+        }
+        let collapse = state.groups.iter().any(|group| !group.collapsed);
+        for group in &mut state.groups {
+            group.collapsed = collapse;
+        }
+    }
+    push_ui_state(state);
+    save_session_due(state);
+    apply_layout(state);
+}
+
+fn cycle_group(state: &Rc<RefCell<AppState>>, delta: i32) {
+    let target = {
+        let state_ref = state.borrow();
+        if state_ref.groups.is_empty() {
+            return;
+        }
+        let active_group = state_ref
+            .active_tab()
+            .and_then(|tab| tab.group)
+            .and_then(|id| state_ref.groups.iter().position(|group| group.id == id));
+        let current = active_group.unwrap_or(0) as i32;
+        let next = (current + delta).rem_euclid(state_ref.groups.len() as i32) as usize;
+        state_ref.groups[next].id
+    };
+    let target_tab = {
+        let state_ref = state.borrow();
+        state_ref
+            .tabs
+            .iter()
+            .find(|tab| tab.group == Some(target))
+            .map(|tab| tab.id)
+    };
+    if let Some(id) = target_tab {
+        {
+            let mut state_ref = state.borrow_mut();
+            if let Some(group) = state_ref.groups.iter_mut().find(|group| group.id == target) {
+                group.collapsed = false;
+            }
+        }
+        activate_tab(state, id);
+    }
+}
+
+fn auto_group_by_domain(state: &Rc<RefCell<AppState>>) {
+    use std::collections::HashMap;
+    let mut groups: HashMap<String, Vec<TabId>> = HashMap::new();
+    {
+        let state_ref = state.borrow();
+        for tab in &state_ref.tabs {
+            if tab.pinned || tab.group.is_some() {
+                continue;
+            }
+            let Ok(url) = Url::parse(&tab.url) else {
+                continue;
+            };
+            let Some(host) = url.host_str() else {
+                continue;
+            };
+            groups
+                .entry(host.trim_start_matches("www.").to_owned())
+                .or_default()
+                .push(tab.id);
+        }
+    }
+    let mut changed = false;
+    for (host, tabs) in groups {
+        if tabs.len() < 2 {
+            continue;
+        }
+        let group_id = {
+            let mut state = state.borrow_mut();
+            if let Some(group) = state.groups.iter().find(|group| group.name == host) {
+                group.id
+            } else {
+                let id = state.next_group_id;
+                state.next_group_id += 1;
+                let hue = (host.bytes().fold(0u32, |acc, byte| {
+                    acc.wrapping_mul(31).wrapping_add(byte as u32)
+                }) % 360) as u16;
+                state.groups.push(TabGroup {
+                    id,
+                    name: host.clone(),
+                    collapsed: false,
+                    hue,
+                });
+                id
+            }
+        };
+        let mut state = state.borrow_mut();
+        for tab_id in tabs {
+            if let Some(tab) = state.tab_mut(tab_id) {
+                tab.group = Some(group_id);
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        push_ui_state(state);
+        save_session_due(state);
+    }
+}
+
+fn set_tab_container(state: &Rc<RefCell<AppState>>, id: TabId, container: &str) {
+    {
+        let mut state_ref = state.borrow_mut();
+        let Some(tab) = state_ref.tab_mut(id) else {
+            return;
+        };
+        let next = if container == "none" {
+            None
+        } else {
+            Some(container.to_owned())
+        };
+        if tab.container == next {
+            return;
+        }
+        tab.container = next;
+        let _ = tab.webview.take();
+    }
+    push_ui_state(state);
+    ensure_tab_webview(state, id);
+    save_session_due(state);
 }
 
 fn move_tab(state: &Rc<RefCell<AppState>>, tab_id: TabId, target_id: TabId) {
@@ -2528,6 +2903,23 @@ fn handle_shortcut(
         if let Some(id) = tab_number_id(state, virtual_key - 0x30) {
             let _ = state.borrow().proxy.send_event(AppEvent::Activate(id));
         }
+        true
+    } else if ctrl && shift && virtual_key == 0x41 {
+        {
+            let mut state = state.borrow_mut();
+            state.switcher_open = true;
+        }
+        apply_layout(state);
+        push_ui_state(state);
+        true
+    } else if ctrl && shift && virtual_key == 0x47 {
+        toggle_all_groups(state);
+        true
+    } else if ctrl && alt && virtual_key == 0x28 {
+        cycle_group(state, 1);
+        true
+    } else if ctrl && alt && virtual_key == 0x26 {
+        cycle_group(state, -1);
         true
     } else if ctrl && (virtual_key == 0x46 || scan_code == 0x21) {
         open_find(state);
@@ -3772,6 +4164,33 @@ fn adblock_request_type(
 }
 
 #[cfg(target_os = "windows")]
+fn custom_adblock_match(rules: &[String], url: &str) -> Option<bool> {
+    for rule in rules {
+        let rule = rule.trim();
+        if rule.is_empty() || rule.starts_with('!') || rule.contains("##") || rule.contains("#@#") {
+            continue;
+        }
+        let (allow, rule) = if let Some(rule) = rule.strip_prefix("@@") {
+            (true, rule)
+        } else {
+            (false, rule)
+        };
+        let needle = rule
+            .trim_start_matches("||")
+            .trim_end_matches('^')
+            .trim_end_matches('$')
+            .trim_matches('|')
+            .trim_matches('/');
+        if needle.is_empty() {
+            continue;
+        }
+        if url.contains(needle) {
+            return Some(!allow);
+        }
+    }
+    None
+}
+
 fn adblock_exception(exceptions: &[String], url: &str, source_url: &str) -> bool {
     let matches = |value: &str| {
         Url::parse(value)
@@ -3827,7 +4246,14 @@ fn install_adblock_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, tab
         if adblock_exception(&exceptions, &url, &source_url) {
             return Ok(());
         }
-        let outcome = {
+        let custom_rules = state.borrow().settings.adblock_custom_rules.clone();
+        let custom = custom_adblock_match(&custom_rules, &url);
+        if custom == Some(false) {
+            return Ok(());
+        }
+        let outcome = if custom == Some(true) {
+            adblock::Match::Block
+        } else {
             let state = state.borrow();
             let Some(engine) = &state.adblock_engine else {
                 return Ok(());
@@ -3997,9 +4423,31 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 let _ = state.borrow().proxy.send_event(AppEvent::RemoveGroup(id));
             }
         }
+        Some("groups.color") => {
+            if let Some(group_id) = message.get("groupId").and_then(|value| value.as_u64()) {
+                {
+                    let mut state = state.borrow_mut();
+                    if let Some(group) = state.groups.iter_mut().find(|group| group.id == group_id)
+                    {
+                        group.hue = (group.hue + 47) % 360;
+                    }
+                }
+                push_ui_state(state);
+                save_session_due(state);
+            }
+        }
+        Some("groups.autogroup") => auto_group_by_domain(state),
         Some("groups.newTab") => {
             if let Some(id) = message.get("groupId").and_then(|value| value.as_u64()) {
                 let _ = state.borrow().proxy.send_event(AppEvent::NewTabInGroup(id));
+            }
+        }
+        Some("tabs.container") => {
+            if let (Some(id), Some(container)) = (
+                message.get("id").and_then(|value| value.as_u64()),
+                message.get("container").and_then(|value| value.as_str()),
+            ) {
+                set_tab_container(state, TabId(id), container);
             }
         }
         Some("tabs.mute") => {
@@ -4268,6 +4716,21 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 .unwrap_or(true);
             find_in_page(state, text, forward);
         }
+        Some("settings.export") => export_config(state),
+        Some("session.saveAs") => save_session_as(state),
+        Some("adblock.whitelist") => whitelist_current(state),
+        Some("page.pdf") => print_active_pdf(state),
+        Some("page.screenshot") => screenshot_window(state),
+        Some("session.openAs") => open_session_as(state),
+        Some("settings.import") => import_config(state),
+        Some("ui.switcher") => {
+            let open = message
+                .get("open")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            state.borrow_mut().switcher_open = open;
+            apply_layout(state);
+        }
         Some("ui.prompt") => {
             let open = message
                 .get("open")
@@ -4406,6 +4869,11 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                     settings.theme = value.to_owned();
                 }
             }
+            if let Some(value) = message.get("language").and_then(|value| value.as_str()) {
+                if matches!(value, "ru" | "en") {
+                    settings.language = value.to_owned();
+                }
+            }
             if let Some(value) = message.get("startup").and_then(|value| value.as_str()) {
                 if matches!(value, "restore" | "newtab") {
                     settings.startup = value.to_owned();
@@ -4422,6 +4890,17 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             }
             if let Some(value) = message.get("sidebarWidth").and_then(|value| value.as_u64()) {
                 settings.sidebar_width = (value as u32).clamp(72, SIDEBAR_WIDTH);
+            }
+            if let Some(values) = message
+                .get("adblockCustomRules")
+                .and_then(|value| value.as_array())
+            {
+                settings.adblock_custom_rules = values
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .map(|value| value.trim().to_owned())
+                    .filter(|value| !value.is_empty())
+                    .collect();
             }
             if let Some(values) = message
                 .get("adblockExceptions")
@@ -4838,13 +5317,26 @@ fn main() -> wry::Result<()> {
     }
 
     adblock::spawn_loader(proxy.clone(), false, !private);
+    {
+        let autosave_proxy = proxy.clone();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(Duration::from_secs(5));
+                if autosave_proxy.send_event(AppEvent::Autosave).is_err() {
+                    break;
+                }
+            }
+        });
+    }
 
     let session = if private || settings.startup == "newtab" {
         None
     } else {
         rustle_storage::load_session()
     };
+    let recovered = session.as_ref().is_some_and(|value| !value.clean_exit);
     restore_session(&state, session);
+    state.borrow_mut().recovered = recovered;
 
     let active = state.borrow().active;
     ensure_tab_webview(&state, active);
@@ -5093,7 +5585,12 @@ fn main() -> wry::Result<()> {
             Event::UserEvent(AppEvent::Title(tab_id, title)) => {
                 on_title(&state, tab_id, title);
             }
-            Event::UserEvent(AppEvent::AdblockReady(event)) => {
+            Event::UserEvent(AppEvent::Autosave) => {
+        if state.borrow().ready {
+            save_session_state(&state, false);
+        }
+    }
+    Event::UserEvent(AppEvent::AdblockReady(event)) => {
                 match event {
                     adblock::AdblockEvent::Status(info) => {
                         state.borrow_mut().adblock_info = info;

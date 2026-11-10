@@ -347,3 +347,33 @@ pub fn generic_selectors(
 ) -> Vec<String> {
     engine.hidden_class_id_selectors(classes, ids, exceptions)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fallback_list_blocks_ads() {
+        let mut set = FilterSet::new(false);
+        set.add_filter_list(FALLBACK_RULES.to_owned(), ParseOptions::default());
+        let engine = Engine::new_with_filter_set(set);
+        assert!(matches!(
+            check(
+                &engine,
+                "https://doubleclick.net/ad.js",
+                "https://example.com/",
+                "script"
+            ),
+            Match::Block
+        ));
+        assert!(matches!(
+            check(
+                &engine,
+                "https://example.com/app.js",
+                "https://example.com/",
+                "script"
+            ),
+            Match::Allow
+        ));
+    }
+}

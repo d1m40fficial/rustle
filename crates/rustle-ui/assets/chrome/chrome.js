@@ -170,7 +170,7 @@
     return favicon;
   };
 
-  const groupHue = (id) => (Number(id) * 53) % 360;
+  const groupHue = (group) => Number(group.hue ?? ((Number(group.id) * 53) % 360));
 
   const makeGroupChip = (group, children) => {
     const chip = document.createElement("div");
@@ -181,7 +181,7 @@
     chip.setAttribute("role", "button");
     chip.setAttribute("aria-expanded", String(!group.collapsed));
     chip.title = group.name;
-    chip.style.setProperty("--group-hue", groupHue(group.id));
+    chip.style.setProperty("--group-hue", groupHue(group));
 
     const name = document.createElement("span");
     name.className = "tab-group__name";
@@ -254,7 +254,7 @@
     section.className =
       "tab-group tab-group--horizontal" + (group.collapsed ? " tab-group--collapsed" : "");
     section.dataset.groupId = String(group.id);
-    section.style.setProperty("--group-hue", groupHue(group.id));
+    section.style.setProperty("--group-hue", groupHue(group));
     section.append(makeGroupChip(group, children));
     if (!group.collapsed) {
       const body = document.createElement("div");
@@ -884,6 +884,10 @@
     if (exceptions) {
       exceptions.value = (settings.adblockExceptions || []).join("\n");
     }
+    const customRules = byId("setting-adblock-rules");
+    if (customRules) {
+      customRules.value = (settings.adblockCustomRules || []).join("\n");
+    }
     const status = byId("settings-status");
     if (status) {
       status.textContent = "";
@@ -995,6 +999,19 @@
     document.documentElement.style.setProperty("--suggest-width", rect.width + "px");
   };
 
+  const applyLanguage = (language) => {
+    const en = language === "en";
+    document.documentElement.lang = en ? "en" : "ru";
+    const tagline = document.querySelector(".newtab__tagline");
+    if (tagline) tagline.textContent = en ? "Minimal browser. 0.2.0." : "Минималистичный браузер. 0.2.0.";
+    const query = byId("newtab-query");
+    if (query) query.placeholder = en ? "Search or address" : "Поиск или адрес";
+    const add = byId("newtab-add");
+    if (add) add.textContent = en ? "+ Add site" : "+ Добавить сайт";
+    const edit = byId("newtab-edit");
+    if (edit && !tileEdit) edit.textContent = en ? "✎ Edit tiles" : "✎ Редактировать плитки";
+  };
+
   const applyState = (payload) => {
     if (!payload || typeof payload !== "object") {
       return;
@@ -1008,6 +1025,14 @@
 
     if (payload.theme) {
       document.documentElement.dataset.theme = payload.theme;
+    }
+    if (payload.language) {
+      applyLanguage(payload.language);
+    }
+    if (payload.switcherOpen === true) {
+      openSwitcher();
+    } else if (payload.switcherOpen === false) {
+      hideSwitcher();
     }
     const themeToggle = byId("theme-toggle");
     if (themeToggle) {
@@ -1170,6 +1195,81 @@
     else if (event.key === "Escape") { event.preventDefault(); closePrompt(); }
   });
 
+  let switcherIndex = 0;
+  let switcherItems = [];
+
+  const hideSwitcher = () => {
+    const overlay = byId("switcher-overlay");
+    if (overlay) overlay.hidden = true;
+  };
+
+  const closeSwitcher = () => {
+    hideSwitcher();
+    send({ type: "ui.switcher", open: false });
+  };
+
+  const activateSwitcherItem = (index) => {
+    const item = switcherItems[index];
+    if (!item) return;
+    hideSwitcher();
+    send({ type: "ui.switcher", open: false });
+    send({ type: "tabs.activate", id: item.id });
+  };
+
+  const renderSwitcher = () => {
+    const list = byId("switcher-list");
+    const input = byId("switcher-input");
+    if (!list || !input) return;
+    const query = input.value.trim().toLowerCase();
+    const tabs = (current.tabs || []).filter((tab) => {
+      const title = String(tab.title || "").toLowerCase();
+      const url = String(tab.url || "").toLowerCase();
+      return !query || title.includes(query) || url.includes(query);
+    });
+    switcherItems = tabs;
+    switcherIndex = Math.min(switcherIndex, Math.max(0, tabs.length - 1));
+    list.replaceChildren();
+    tabs.forEach((tab, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "switcher__item" + (index === switcherIndex ? " is-active" : "");
+      if (tab.faviconData) {
+        const img = document.createElement("img");
+        img.src = tab.faviconData;
+        img.alt = "";
+        button.append(img);
+      } else {
+        const mark = document.createElement("span");
+        mark.className = "switcher__mark";
+        mark.textContent = String(tab.title || "?").slice(0, 2).toUpperCase();
+        button.append(mark);
+      }
+      const title = document.createElement("span");
+      title.className = "switcher__title";
+      title.textContent = tab.title || "Без названия";
+      const url = document.createElement("span");
+      url.className = "switcher__url";
+      url.textContent = tab.url || "";
+      button.append(title, url);
+      button.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        activateSwitcherItem(index);
+      });
+      list.append(button);
+    });
+  };
+
+  const openSwitcher = () => {
+    const overlay = byId("switcher-overlay");
+    const input = byId("switcher-input");
+    if (!overlay || !input) return;
+    switcherIndex = 0;
+    overlay.hidden = false;
+    input.value = "";
+    renderSwitcher();
+    window.setTimeout(() => input.focus(), 20);
+  };
+
   const handleMenuAction = (action) => {
     if (!action || typeof action !== "string") {
       return;
@@ -1192,6 +1292,18 @@
         send({ type: "tabs.new" });
       } else if (name === "reopen") {
         send({ type: "tabs.reopen" });
+      } else if (name === "screenshot") {
+        send({ type: "page.screenshot" });
+      } else if (name === "pdf") {
+        send({ type: "page.pdf" });
+      } else if (name === "whitelist") {
+        send({ type: "adblock.whitelist" });
+      } else if (name === "session.save") {
+        send({ type: "session.saveAs" });
+      } else if (name === "session.open") {
+        send({ type: "session.openAs" });
+      } else if (name === "autogroup") {
+        send({ type: "groups.autogroup" });
       } else if (name === "vertical") {
         send({ type: "ui.vertical", enabled: !current.vertical });
       } else if (name === "bookmark") {
@@ -1543,6 +1655,10 @@
           clearOnExit: byId("setting-clear-exit").checked,
           adblock: byId("setting-adblock").checked,
             sidebarWidth: Number(byId("setting-sidebar-width")?.value || 282),
+            adblockCustomRules: (byId("setting-adblock-rules")?.value || "")
+              .split(/\r?\n/)
+              .map((entry) => entry.trim())
+              .filter(Boolean),
             adblockExceptions: (byId("setting-adblock-exceptions")?.value || "")
               .split(/[,\n]+/)
               .map((entry) => entry.trim())
@@ -1805,6 +1921,36 @@
     if (translate) {
       translate.addEventListener("click", () => {
         send({ type: "tabs.newUrl", url: "https://translate.google.com/" });
+      });
+    }
+
+    const switcherInput = byId("switcher-input");
+    const switcherOverlay = byId("switcher-overlay");
+    if (switcherInput) {
+      switcherInput.addEventListener("input", () => {
+        switcherIndex = 0;
+        renderSwitcher();
+      });
+      switcherInput.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          if (!switcherItems.length) return;
+          switcherIndex = (switcherIndex + (event.key === "ArrowDown" ? 1 : -1) + switcherItems.length) % switcherItems.length;
+          renderSwitcher();
+          const active = document.querySelector(".switcher__item.is-active");
+          if (active) active.scrollIntoView({ block: "nearest" });
+        } else if (event.key === "Enter") {
+          event.preventDefault();
+          activateSwitcherItem(switcherIndex);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          closeSwitcher();
+        }
+      });
+    }
+    if (switcherOverlay) {
+      switcherOverlay.addEventListener("mousedown", (event) => {
+        if (event.target === switcherOverlay) closeSwitcher();
       });
     }
 
