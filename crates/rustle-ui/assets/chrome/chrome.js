@@ -1447,6 +1447,12 @@
 
     const newtabForm = byId("newtab-search");
     if (newtabForm) {
+      newtabForm.addEventListener("click", (event) => {
+        if (event.target.closest("button")) {
+          return;
+        }
+        byId("newtab-query").focus();
+      });
       newtabForm.addEventListener("submit", (event) => {
         event.preventDefault();
         const query = byId("newtab-query").value.trim();
