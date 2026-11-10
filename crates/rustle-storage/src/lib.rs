@@ -120,6 +120,8 @@ pub struct SessionTab {
     pub group: Option<u64>,
     #[serde(default)]
     pub pinned: bool,
+    #[serde(default)]
+    pub muted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

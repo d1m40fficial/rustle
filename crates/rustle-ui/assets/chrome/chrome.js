@@ -1218,7 +1218,9 @@
         send({ type: "tabs.pin", id, pinned: true });
       } else if (name === "unpin") {
         send({ type: "tabs.pin", id, pinned: false });
-      } else if (name === "close") {
+      } else if (name === "mute") {
+          send({ type: "tabs.mute", id });
+        } else if (name === "close") {
         send({ type: "tabs.close", id });
       } else if (name === "ungroup") {
         send({ type: "tabs.moveGroup", id, groupId: null });

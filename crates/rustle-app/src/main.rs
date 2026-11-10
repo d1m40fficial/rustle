@@ -52,8 +52,8 @@ use webview2_com::{
     Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED, COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS,
         COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED, COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG,
-        ICoreWebView2_4, ICoreWebView2_13, ICoreWebView2_15, ICoreWebView2DownloadOperation,
-        ICoreWebView2Profile2,
+        ICoreWebView2_4, ICoreWebView2_8, ICoreWebView2_13, ICoreWebView2_15,
+        ICoreWebView2DownloadOperation, ICoreWebView2Profile2,
     },
     StateChangedEventHandler, WebResourceRequestedEventHandler, ZoomFactorChangedEventHandler,
 };
@@ -146,6 +146,7 @@ struct Tab {
     zoom: f64,
     group: Option<u64>,
     pinned: bool,
+    muted: bool,
     blocked: u64,
     cosmetic_generic: bool,
     cosmetic_exceptions: HashSet<String>,
@@ -177,6 +178,7 @@ impl Tab {
             zoom: 1.0,
             group: None,
             pinned: false,
+            muted: false,
             blocked: 0,
             cosmetic_generic: true,
             cosmetic_exceptions: HashSet::new(),
@@ -485,6 +487,7 @@ fn save_session_state(state: &Rc<RefCell<AppState>>, clean_exit: bool) {
                     title: tab.title.clone(),
                     group: tab.group,
                     pinned: tab.pinned,
+                    muted: tab.muted,
                 })
                 .collect(),
             closed: state
@@ -495,6 +498,7 @@ fn save_session_state(state: &Rc<RefCell<AppState>>, clean_exit: bool) {
                     title: tab.title.clone(),
                     group: None,
                     pinned: false,
+                    muted: false,
                 })
                 .collect(),
             groups: state
@@ -560,6 +564,7 @@ fn restore_session(state: &Rc<RefCell<AppState>>, session: Option<Session>) {
             if let Some(entry) = state.tab_mut(id) {
                 entry.favicon = favicon;
                 entry.pinned = tab.pinned;
+                entry.muted = tab.muted;
                 entry.group = if tab.pinned { None } else { group };
             }
         }
@@ -616,6 +621,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                     "active": tab.id == state.active,
                     "groupId": tab.group,
                     "pinned": tab.pinned,
+                    "muted": tab.muted,
                     "blocked": tab.blocked,
                     "error": tab.error.clone(),
                 })
@@ -998,6 +1004,16 @@ mod native_menu {
                                 "Закрепить вкладку",
                             );
                         }
+                        push_checked(
+                            &mut entries,
+                            &format!("tab.mute:{}", id.0),
+                            if tab.muted {
+                                "Включить звук вкладки"
+                            } else {
+                                "Выключить звук вкладки"
+                            },
+                            tab.muted,
+                        );
                         if !tab.pinned {
                             separator(&mut entries);
                             push(
@@ -1589,6 +1605,8 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
             unsafe {
                 let _ = webview.controller().SetZoomFactor(zoom);
             }
+            #[cfg(target_os = "windows")]
+            apply_webview_muted(webview, tab.muted);
         }
     }
 
@@ -2155,6 +2173,32 @@ fn new_tab(state: &Rc<RefCell<AppState>>) {
     };
     activate_tab(state, id);
     focus_address(state);
+}
+
+#[cfg(target_os = "windows")]
+fn apply_webview_muted(webview: &WebView, muted: bool) {
+    if let Ok(webview) = webview.webview().cast::<ICoreWebView2_8>() {
+        unsafe {
+            let _ = webview.SetIsMuted(muted);
+        }
+    }
+}
+
+fn toggle_tab_muted(state: &Rc<RefCell<AppState>>, id: TabId) {
+    let muted = {
+        let mut state = state.borrow_mut();
+        let Some(tab) = state.tab_mut(id) else {
+            return;
+        };
+        tab.muted = !tab.muted;
+        tab.muted
+    };
+    #[cfg(target_os = "windows")]
+    if let Some(webview) = state.borrow().tab(id).and_then(|tab| tab.webview.as_ref()) {
+        apply_webview_muted(webview, muted);
+    }
+    push_ui_state(state);
+    save_session_due(state);
 }
 
 fn set_tab_pinned(state: &Rc<RefCell<AppState>>, id: TabId, pinned: bool) {
@@ -3941,6 +3985,11 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
         Some("groups.newTab") => {
             if let Some(id) = message.get("groupId").and_then(|value| value.as_u64()) {
                 let _ = state.borrow().proxy.send_event(AppEvent::NewTabInGroup(id));
+            }
+        }
+        Some("tabs.mute") => {
+            if let Some(id) = message.get("id").and_then(|value| value.as_u64()) {
+                toggle_tab_muted(state, TabId(id));
             }
         }
         Some("tabs.move") => {
