@@ -1523,6 +1523,13 @@
       });
     }
 
+    const engineSelect = byId("setting-engine");
+    if (engineSelect) {
+      engineSelect.addEventListener("change", () => {
+        send({ type: "settings.save", searchEngine: engineSelect.value });
+      });
+    }
+
     const settingsForm = byId("settings-form");
     if (settingsForm) {
       settingsForm.addEventListener("submit", (event) => {
