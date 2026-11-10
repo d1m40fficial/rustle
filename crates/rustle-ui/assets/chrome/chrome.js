@@ -183,28 +183,10 @@
     chip.title = group.name;
     chip.style.setProperty("--group-hue", groupHue(group.id));
 
-    const dot = document.createElement("span");
-    dot.className = "tab-group__dot";
-
-    const arrow = document.createElement("span");
-    arrow.className = "tab-group__arrow";
-    arrow.textContent = group.collapsed ? "›" : "⌄";
-
     const name = document.createElement("span");
     name.className = "tab-group__name";
     name.textContent = group.name;
-
-
-    chip.append(dot, arrow, name);
-
-    const add = document.createElement("button");
-    add.type = "button";
-    add.className = "tab-group__add";
-    add.dataset.groupNew = String(group.id);
-    add.title = "Новая вкладка в группе";
-    add.setAttribute("aria-label", "Новая вкладка в группе");
-    add.textContent = "+";
-    chip.append(add);
+    chip.append(name);
     return chip;
   };
 
@@ -277,11 +259,7 @@
     if (!group.collapsed) {
       const body = document.createElement("div");
       body.className = "tab-group__tabs";
-        children.forEach((tab) => {
-          const element = makeTabElement(tab, activeId, false);
-          element.classList.add("tab--compact");
-          body.append(element);
-        });
+        children.forEach((tab) => body.append(makeTabElement(tab, activeId, false)));
       section.append(body);
     }
     return section;

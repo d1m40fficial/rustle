@@ -207,6 +207,10 @@ pub fn load_settings() -> Settings {
         return Settings::default();
     };
     if settings.version == SETTINGS_VERSION {
+        let mut settings = settings;
+        if settings.adblock_exceptions.len() == 1 && settings.adblock_exceptions[0] == "hltv.org" {
+            settings.adblock_exceptions.push("vk.ru".to_owned());
+        }
         settings
     } else {
         Settings::default()
