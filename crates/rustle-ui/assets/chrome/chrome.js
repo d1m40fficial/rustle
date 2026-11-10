@@ -1804,9 +1804,6 @@
     const translate = byId("translate-page");
     if (translate) {
       translate.addEventListener("click", () => {
-        if (!current.url || !/^https?:\/\//.test(current.url)) {
-          return;
-        }
         send({ type: "tabs.newUrl", url: "https://translate.google.com/" });
       });
     }
