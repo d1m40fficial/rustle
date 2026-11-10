@@ -41,14 +41,13 @@
       <input id="address" class="address__input" type="text" value="" placeholder="Поиск или адрес" spellcheck="false" autocomplete="off" aria-label="Адресная строка">
     </div>
 
+    <span class="zoom-label" id="zoom-label" title="Масштаб — сбросить" role="button" tabindex="0" aria-live="polite">100%</span>
+
     <button class="chrome-btn" type="button" id="translate-page" title="Google Переводчик" aria-label="Google Переводчик"><span class="translate-icon">A文</span></button>
     <button class="chrome-btn" type="button" data-nav="rustle://downloads" title="Загрузки" aria-label="Загрузки">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-4-4 4 4 4-4M5 19h14" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
-    <button class="chrome-btn" type="button" id="tiles-edit" title="Редактировать плитки" aria-label="Редактировать плитки">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L18.5 9.5a2.12 2.12 0 0 0-3-3L5 17v3Z" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linejoin="round"/><path d="m12.5 7.5 3 3" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round"/></svg>
-    </button>
-    <span class="zoom-label" id="zoom-label" title="Масштаб — сбросить" role="button" tabindex="0" aria-live="polite">100%</span>
+    <button class="chrome-btn" type="button" id="theme-toggle" title="Сменить тему" aria-label="Сменить тему"><span id="theme-toggle-icon">☾</span></button>
     <button class="chrome-btn" type="button" id="menu-toggle" title="Меню" aria-label="Меню" aria-haspopup="menu" aria-expanded="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="19" r="1.5" fill="currentColor"/></svg>
     </button>
@@ -94,7 +93,10 @@
       </form>
 
       <div class="newtab__shortcuts" id="newtab-shortcuts"></div>
-      <button class="newtab__add" id="newtab-add" type="button">+ Добавить сайт</button>
+      <div class="newtab__actions">
+        <button class="newtab__add" id="newtab-add" type="button">+ Добавить сайт</button>
+        <button class="newtab__add newtab__edit" id="newtab-edit" type="button">✎ Редактировать плитки</button>
+      </div>
 
       <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.2.0</span></p>
     </div>
@@ -176,7 +178,14 @@
           <option value="light">Светлая</option>
         </select>
       </label>
-      <label class="settings__row">
+              <label class="settings__row">
+          <span>
+            <strong>Ширина боковой панели</strong>
+            <small id="setting-sidebar-width-label">282 px</small>
+          </span>
+          <input id="setting-sidebar-width" type="range" min="72" max="282" step="1" value="282">
+        </label>
+<label class="settings__row">
         <span>
           <strong>При запуске</strong>
           <small>Восстанавливать сессию или открывать новую вкладку.</small>

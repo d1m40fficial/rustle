@@ -643,3 +643,27 @@ body.collapsed .tab-group__favicons {
   outline: 1px solid var(--accent);
   outline-offset: -1px;
 }
+
+body.narrow .sidebar-heading,
+body.narrow .sidebar-count,
+body.narrow .sidebar-tab__copy,
+body.narrow .tab-group__name,
+body.narrow .tab-group__actions {
+  display: none;
+}
+
+body.narrow .sidebar-head {
+  justify-content: center;
+  padding: 0;
+}
+
+body.narrow .sidebar-tab,
+body.narrow .tab-group__head {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+body.narrow .sidebar-tab {
+  min-height: 38px;
+}

@@ -217,7 +217,7 @@ input:focus-visible,
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 104px 0 var(--toolbar-nav-left, 72px);
+  padding: 0 84px 0 var(--toolbar-nav-left, 72px);
   background: var(--bg-elevated);
 }
 
@@ -486,6 +486,20 @@ html.error-mode .newtab-view {
   color: var(--accent);
 }
 
+.newtab__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.newtab__actions .newtab__add {
+  margin-top: 0;
+}
+
+.newtab__edit {
+  border-style: solid;
+}
 .newtab__shortcut > span:not(.newtab__mark) {
   max-width: 100%;
   overflow: hidden;
@@ -1156,8 +1170,8 @@ html.private-mode .build-badge {
   font-size: 10px;
   text-align: center;
   cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
+  opacity: 0.65;
+  pointer-events: auto;
   transition: opacity 0.25s ease;
 }
 
@@ -1614,4 +1628,9 @@ html.vertical-mode .prompt-overlay {
 .tab--drop {
   outline: 1px solid var(--accent);
   outline-offset: -1px;
+}
+
+#setting-sidebar-width {
+  width: 180px;
+  accent-color: var(--accent);
 }

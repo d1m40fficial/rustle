@@ -436,9 +436,9 @@
   };
 
   const DEFAULT_SHORTCUTS = [
-    { url: "https://github.com/d1m40fficial/rustle", title: "GitHub", mark: "GH" },
+    { url: "https://github.com", title: "GitHub", mark: "GH" },
     { url: "https://www.youtube.com", title: "YouTube", mark: "YT" },
-    { url: "https://ru.wikipedia.org", title: "Википедия", mark: "W" },
+    { url: "https://mail.google.com", title: "Gmail", mark: "GM" },
   ];
 
   const shortcutsKey = "rustle.shortcuts.v1";
@@ -452,10 +452,13 @@
   const readShortcuts = () => {
     try {
       const raw = localStorage.getItem(shortcutsKey);
-      const parsed = raw ? JSON.parse(raw) : null;
-      if (Array.isArray(parsed) && parsed.length) {
-        return parsed;
+      if (raw !== null) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
       }
+      localStorage.setItem(shortcutsKey, JSON.stringify(DEFAULT_SHORTCUTS));
     } catch {
       // ignore malformed storage
     }
@@ -856,6 +859,15 @@
     if (startup) {
       startup.value = settings.startup || "restore";
     }
+    const sidebarWidth = byId("setting-sidebar-width");
+    if (sidebarWidth) {
+      sidebarWidth.value = String(settings.sidebarWidth || 282);
+      const label = byId("setting-sidebar-width-label");
+      if (label) label.textContent = sidebarWidth.value + " px";
+      sidebarWidth.addEventListener("input", () => {
+        if (label) label.textContent = sidebarWidth.value + " px";
+      });
+    }
     const https = byId("setting-https");
     if (https) {
       https.checked = Boolean(settings.httpsFirst);
@@ -997,6 +1009,13 @@
     if (payload.theme) {
       document.documentElement.dataset.theme = payload.theme;
     }
+    const themeToggle = byId("theme-toggle");
+    if (themeToggle) {
+      const light = payload.theme === "light";
+      const icon = byId("theme-toggle-icon");
+      if (icon) icon.textContent = light ? "☀" : "☾";
+      themeToggle.title = light ? "Тёмная тема" : "Светлая тема";
+    }
     document.documentElement.classList.toggle("private-mode", Boolean(payload.private));
     const about = byId("about");
     if (about) {
@@ -1054,12 +1073,10 @@
     document.documentElement.classList.toggle("error-mode", Boolean(error));
     document.documentElement.classList.toggle("vertical-mode", Boolean(payload.vertical));
     document.documentElement.classList.toggle("overlay-mode", mode !== "web");
-    document.documentElement.style.setProperty(
-      "--sidebar-width",
-      payload.vertical ? (payload.sidebarCollapsed ? "56px" : "282px") : "0px",
-    );
+    const configuredSidebar = Math.max(72, Number(payload.sidebarWidth || 282));
+    const sideWidth = payload.vertical ? (payload.sidebarCollapsed ? 56 : configuredSidebar) : 0;
+    document.documentElement.style.setProperty("--sidebar-width", sideWidth + "px");
     document.documentElement.style.setProperty("--chrome-offset", payload.vertical ? "44px" : "78px");
-    const sideWidth = payload.vertical ? (payload.sidebarCollapsed ? 56 : 282) : 0;
     document.documentElement.style.setProperty("--toolbar-nav-left", Math.max(72, sideWidth) + "px");
     window.requestAnimationFrame(syncAddressOverlay);
     if (Array.isArray(payload.bookmarks)) {
@@ -1512,6 +1529,7 @@
           httpsFirst: byId("setting-https").checked,
           clearOnExit: byId("setting-clear-exit").checked,
           adblock: byId("setting-adblock").checked,
+            sidebarWidth: Number(byId("setting-sidebar-width")?.value || 282),
             adblockExceptions: (byId("setting-adblock-exceptions")?.value || "")
               .split(/[,\n]+/)
               .map((entry) => entry.trim())
@@ -1638,14 +1656,19 @@
     if (toolbarHome) {
       toolbarHome.addEventListener("click", () => send({ type: "nav.go", url: "rustle://newtab" }));
     }
-    const tilesEdit = byId("tiles-edit");
+    const tilesEdit = byId("newtab-edit");
     if (tilesEdit) {
       tilesEdit.addEventListener("click", () => {
         tileEdit = !tileEdit;
         tilesEdit.classList.toggle("is-active", tileEdit);
-        tilesEdit.title = tileEdit ? "Готово" : "Редактировать плитки";
+        tilesEdit.textContent = tileEdit ? "✓ Готово" : "✎ Редактировать плитки";
         renderShortcuts();
       });
+    }
+
+    const themeButton = byId("theme-toggle");
+    if (themeButton) {
+      themeButton.addEventListener("click", () => send({ type: "ui.theme" }));
     }
 
     const windowControls = byId("window-controls");

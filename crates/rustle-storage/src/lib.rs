@@ -69,6 +69,8 @@ pub struct Settings {
     pub vertical_tabs: bool,
     #[serde(default)]
     pub sidebar_collapsed: bool,
+    #[serde(default = "default_sidebar_width")]
+    pub sidebar_width: u32,
     #[serde(default = "default_adblock_exceptions")]
     pub adblock_exceptions: Vec<String>,
 }
@@ -89,6 +91,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_sidebar_width() -> u32 {
+    282
+}
+
 fn default_adblock_exceptions() -> Vec<String> {
     vec!["hltv.org".to_owned(), "vk.ru".to_owned()]
 }
@@ -105,6 +111,7 @@ impl Default for Settings {
             adblock: true,
             vertical_tabs: false,
             sidebar_collapsed: false,
+            sidebar_width: default_sidebar_width(),
             adblock_exceptions: default_adblock_exceptions(),
         }
     }

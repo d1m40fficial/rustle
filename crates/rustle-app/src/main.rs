@@ -93,6 +93,7 @@ fn app_icon() -> Icon {
 fn webview_browser_args() -> String {
     format!(
         "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
+         --autoplay-policy=no-user-gesture-required \
          --webview-exe-name=Rustle --webview-exe-version={VERSION} --app-user-model-id=Rustle"
     )
 }
@@ -690,6 +691,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
             "zoom": active.map(|tab| tab.zoom).unwrap_or(1.0),
             "vertical": state.vertical,
             "sidebarCollapsed": state.sidebar_collapsed,
+            "sidebarWidth": state.settings.sidebar_width.clamp(72, SIDEBAR_WIDTH),
             "groups": state.groups.iter().map(|group| json!({"id": group.id, "name": group.name, "collapsed": group.collapsed})).collect::<Vec<_>>(),
             "secure": url.starts_with("https://"),
             "bookmarks": state.bookmarks,
@@ -1226,6 +1228,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
         find_open,
         vertical,
         sidebar_collapsed,
+        sidebar_width_setting,
         prompt_open,
     ) = {
         let state = state.borrow();
@@ -1242,6 +1245,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             state.find_open,
             state.vertical,
             state.sidebar_collapsed,
+            state.settings.sidebar_width.clamp(72, SIDEBAR_WIDTH),
             state.prompt_open,
         )
     };
@@ -1255,7 +1259,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
         if sidebar_collapsed {
             SIDEBAR_COLLAPSED
         } else {
-            SIDEBAR_WIDTH
+            sidebar_width_setting
         }
     } else {
         0
@@ -3646,6 +3650,12 @@ fn install_permission_handler(state: &Rc<RefCell<AppState>>, webview: &WebView) 
             let _ = args.Uri(&mut raw);
         }
         let kind = kind.0;
+        if kind == COREWEBVIEW2_PERMISSION_KIND_AUTOPLAY.0 {
+            unsafe {
+                let _ = args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW);
+            }
+            return Ok(());
+        }
         let origin = unsafe { raw.to_string().unwrap_or_default() };
         let key = format!("{origin}:{kind}");
         let allowed = if let Some(value) = state.borrow().permissions.get(&key) {
@@ -4173,6 +4183,20 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 .unwrap_or(false);
             let _ = state.borrow().proxy.send_event(AppEvent::Vertical(enabled));
         }
+        Some("ui.theme") => {
+            let mut settings = state.borrow().settings.clone();
+            settings.theme = if settings.theme == "light" {
+                "dark".to_owned()
+            } else {
+                "light".to_owned()
+            };
+            if !state.borrow().private {
+                let _ = rustle_storage::save_settings(&settings);
+            }
+            state.borrow_mut().settings = settings;
+            push_ui_state(state);
+            apply_layout(state);
+        }
         Some("sidebar.collapse") => {
             {
                 let mut state = state.borrow_mut();
@@ -4396,6 +4420,9 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             if let Some(value) = message.get("adblock").and_then(|value| value.as_bool()) {
                 settings.adblock = value;
             }
+            if let Some(value) = message.get("sidebarWidth").and_then(|value| value.as_u64()) {
+                settings.sidebar_width = (value as u32).clamp(72, SIDEBAR_WIDTH);
+            }
             if let Some(values) = message
                 .get("adblockExceptions")
                 .and_then(|value| value.as_array())
@@ -4411,6 +4438,7 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 let _ = rustle_storage::save_settings(&settings);
             }
             state.borrow_mut().settings = settings;
+            apply_layout(state);
             push_ui_state(state);
         }
         Some(other) => eprintln!("[ipc] unknown message: {other}"),
@@ -4419,9 +4447,13 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
 }
 
 fn create_sidebar(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
-    let (height, window) = {
+    let (height, window, sidebar_width) = {
         let state = state.borrow();
-        (state.height, state.window.clone())
+        (
+            state.height,
+            state.window.clone(),
+            state.settings.sidebar_width.clamp(72, SIDEBAR_WIDTH),
+        )
     };
     let mut context = state
         .borrow_mut()
@@ -4430,7 +4462,7 @@ fn create_sidebar(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
         .expect("WebContext must exist while creating sidebar");
     let ipc_state = Rc::clone(state);
     let result = WebViewBuilder::new_with_web_context(&mut context)
-        .with_bounds(rect(0, 0, SIDEBAR_WIDTH, height))
+        .with_bounds(rect(0, 0, sidebar_width, height))
         .with_browser_accelerator_keys(false)
         .with_additional_browser_args(webview_browser_args())
         .with_custom_protocol("rustle".into(), protocol_handler)
@@ -4445,7 +4477,7 @@ fn create_sidebar(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
         if let Some(sidebar) = &state_ref.sidebar {
             install_accelerators_for_view(state, sidebar);
             let _ = sidebar.set_visible(true);
-            let _ = sidebar.set_bounds(rect(0, 0, SIDEBAR_WIDTH, height));
+            let _ = sidebar.set_bounds(rect(0, 0, sidebar_width, height));
         }
     }
     apply_layout(state);
@@ -4499,6 +4531,101 @@ unsafe extern "system" {
 }
 
 #[cfg(target_os = "windows")]
+#[repr(C)]
+struct ResizePoint {
+    x: i32,
+    y: i32,
+}
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
+struct ResizeRect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+#[cfg(target_os = "windows")]
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn GetCursorPos(point: *mut ResizePoint) -> i32;
+    fn ScreenToClient(hwnd: isize, point: *mut ResizePoint) -> i32;
+    fn GetClientRect(hwnd: isize, rect: *mut ResizeRect) -> i32;
+}
+
+#[cfg(target_os = "windows")]
+#[link(name = "comctl32")]
+unsafe extern "system" {
+    fn SetWindowSubclass(
+        hwnd: isize,
+        callback: Option<
+            unsafe extern "system" fn(isize, u32, usize, isize, usize, usize) -> isize,
+        >,
+        id: usize,
+        data: usize,
+    ) -> i32;
+    fn DefSubclassProc(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> isize;
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn resize_subclass(
+    hwnd: isize,
+    msg: u32,
+    wparam: usize,
+    lparam: isize,
+    _id: usize,
+    _data: usize,
+) -> isize {
+    const WM_NCHITTEST: u32 = 0x0084;
+    const HTCLIENT: isize = 1;
+    const HTLEFT: isize = 10;
+    const HTRIGHT: isize = 11;
+    const HTTOP: isize = 12;
+    const HTTOPLEFT: isize = 13;
+    const HTTOPRIGHT: isize = 14;
+    const HTBOTTOM: isize = 15;
+    const HTBOTTOMLEFT: isize = 16;
+    const HTBOTTOMRIGHT: isize = 17;
+    const BORDER: i32 = 6;
+
+    if msg == WM_NCHITTEST {
+        let mut point = ResizePoint { x: 0, y: 0 };
+        let mut rect = ResizeRect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        unsafe {
+            GetCursorPos(&mut point);
+            ScreenToClient(hwnd, &mut point);
+            GetClientRect(hwnd, &mut rect);
+        }
+        let left = point.x < BORDER;
+        let right = point.x >= rect.right - BORDER;
+        let top = point.y < BORDER;
+        let bottom = point.y >= rect.bottom - BORDER;
+        let hit = match (left, right, top, bottom) {
+            (true, _, true, _) => HTTOPLEFT,
+            (_, true, true, _) => HTTOPRIGHT,
+            (true, _, _, true) => HTBOTTOMLEFT,
+            (_, true, _, true) => HTBOTTOMRIGHT,
+            (true, _, _, _) => HTLEFT,
+            (_, true, _, _) => HTRIGHT,
+            (_, _, true, _) => HTTOP,
+            (_, _, _, true) => HTBOTTOM,
+            _ => HTCLIENT,
+        };
+        if hit != HTCLIENT {
+            return hit;
+        }
+    }
+
+    unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+}
+
+#[cfg(target_os = "windows")]
 fn enable_frameless_resize(window: &Window) {
     const GWL_STYLE: i32 = -16;
     const WS_THICKFRAME: isize = 0x0004_0000;
@@ -4526,6 +4653,7 @@ fn enable_frameless_resize(window: &Window) {
             0,
             SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED,
         );
+        SetWindowSubclass(hwnd, Some(resize_subclass), 1, 0);
     }
 }
 

@@ -214,6 +214,7 @@
   const render = () => {
     document.documentElement.dataset.theme = current.theme === "light" ? "light" : "dark";
     document.body.classList.toggle("collapsed", Boolean(current.sidebarCollapsed));
+    document.body.classList.toggle("narrow", Number(current.sidebarWidth || 282) < 150);
     const count = byId("count");
     if (count) {
       count.textContent = String((current.tabs || []).length);
