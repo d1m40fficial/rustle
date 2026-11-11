@@ -1663,6 +1663,7 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
         tab.webview = Some(webview);
         #[cfg(target_os = "windows")]
         if let Some(webview) = tab.webview.as_ref() {
+            attach_resize_passthrough(webview);
             unsafe {
                 let _ = webview.controller().SetZoomFactor(zoom);
             }
@@ -4950,6 +4951,8 @@ fn create_sidebar(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
         .build_as_child(window.as_ref());
     state.borrow_mut().context = Some(context);
     let sidebar = result?;
+    #[cfg(target_os = "windows")]
+    attach_resize_passthrough(&sidebar);
     state.borrow_mut().sidebar = Some(sidebar);
     {
         let state_ref = state.borrow();
@@ -4988,6 +4991,8 @@ fn create_chrome(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
 
     state.borrow_mut().context = Some(context);
     let chrome = result?;
+    #[cfg(target_os = "windows")]
+    attach_resize_passthrough(&chrome);
     state.borrow_mut().chrome = Some(chrome);
 
     {
@@ -5031,6 +5036,8 @@ unsafe extern "system" {
     fn GetCursorPos(point: *mut ResizePoint) -> i32;
     fn ScreenToClient(hwnd: isize, point: *mut ResizePoint) -> i32;
     fn GetClientRect(hwnd: isize, rect: *mut ResizeRect) -> i32;
+    fn GetWindowRect(hwnd: isize, rect: *mut ResizeRect) -> i32;
+    fn GetAncestor(hwnd: isize, flags: u32) -> isize;
 }
 
 #[cfg(target_os = "windows")]
@@ -5066,7 +5073,7 @@ unsafe extern "system" fn resize_subclass(
     const HTBOTTOM: isize = 15;
     const HTBOTTOMLEFT: isize = 16;
     const HTBOTTOMRIGHT: isize = 17;
-    const BORDER: i32 = 6;
+    const BORDER: i32 = 10;
 
     if msg == WM_NCHITTEST {
         let mut point = ResizePoint { x: 0, y: 0 };
@@ -5102,6 +5109,51 @@ unsafe extern "system" fn resize_subclass(
     }
 
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn child_hit_subclass(
+    hwnd: isize,
+    msg: u32,
+    wparam: usize,
+    lparam: isize,
+    _id: usize,
+    _data: usize,
+) -> isize {
+    const WM_NCHITTEST: u32 = 0x0084;
+    const HTTRANSPARENT: isize = -1;
+    const GA_ROOT: u32 = 2;
+    const BORDER: i32 = 10;
+
+    if msg == WM_NCHITTEST {
+        let mut point = ResizePoint { x: 0, y: 0 };
+        let mut rect = ResizeRect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        unsafe {
+            GetCursorPos(&mut point);
+            let root = GetAncestor(hwnd, GA_ROOT);
+            GetWindowRect(root, &mut rect);
+        }
+        if point.x < rect.left + BORDER
+            || point.x >= rect.right - BORDER
+            || point.y < rect.top + BORDER
+            || point.y >= rect.bottom - BORDER
+        {
+            return HTTRANSPARENT;
+        }
+    }
+    unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+}
+
+#[cfg(target_os = "windows")]
+fn attach_resize_passthrough(webview: &WebView) {
+    unsafe {
+        SetWindowSubclass(webview.hwnd().0 as isize, Some(child_hit_subclass), 2, 0);
+    }
 }
 
 #[cfg(target_os = "windows")]

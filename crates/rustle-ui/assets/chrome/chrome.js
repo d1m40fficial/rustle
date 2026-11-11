@@ -1270,6 +1270,167 @@
     window.setTimeout(() => input.focus(), 20);
   };
 
+  const initParticleHero = () => {
+    const hero = byId("newtab-hero");
+    const canvas = byId("newtab-particles");
+    const logo = hero ? hero.querySelector(".newtab__logo") : null;
+    const brand = hero ? hero.querySelector(".newtab__brand") : null;
+    if (!hero || !canvas || !logo || !brand) return;
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    let particles = [];
+    let active = false;
+    let frame = 0;
+    let leaving = false;
+    let restoreTimer = 0;
+    const mouse = { x: -9999, y: -9999 };
+
+    const build = () => {
+      const rect = hero.getBoundingClientRect();
+      if (rect.width < 40 || rect.height < 40) return false;
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
+      canvas.width = width;
+      canvas.height = height;
+      const color = getComputedStyle(brand).color;
+      const logoRect = logo.getBoundingClientRect();
+      const brandRect = brand.getBoundingClientRect();
+      const next = [];
+      const step = 2;
+
+      const textCanvas = document.createElement("canvas");
+      textCanvas.width = width;
+      textCanvas.height = height;
+      const textCtx = textCanvas.getContext("2d", { willReadFrequently: true });
+      if (textCtx) {
+        const style = getComputedStyle(brand);
+        textCtx.font = style.fontWeight + " " + style.fontSize + " " + style.fontFamily;
+        textCtx.textBaseline = "top";
+        textCtx.fillStyle = "#fff";
+        textCtx.fillText(brand.textContent || "Rustle", brandRect.left - rect.left, brandRect.top - rect.top);
+        const data = textCtx.getImageData(0, 0, width, height).data;
+        for (let y = 0; y < height; y += step) {
+          for (let x = 0; x < width; x += step) {
+            if (data[(y * width + x) * 4 + 3] > 100) {
+              next.push({ x, y, ox: x, oy: y, vx: 0, vy: 0, size: 1.15, color });
+            }
+          }
+        }
+      }
+
+      const logoCanvas = document.createElement("canvas");
+      logoCanvas.width = width;
+      logoCanvas.height = height;
+      const logoCtx = logoCanvas.getContext("2d", { willReadFrequently: true });
+      if (logoCtx) {
+        const lw = logoRect.width;
+        const lh = logoRect.height;
+        logoCtx.drawImage(logo, logoRect.left - rect.left, logoRect.top - rect.top, lw, lh);
+        const data = logoCtx.getImageData(0, 0, width, height).data;
+        for (let y = 0; y < height; y += step) {
+          for (let x = 0; x < width; x += step) {
+            const i = (y * width + x) * 4;
+            const luma = (data[i] + data[i + 1] + data[i + 2]) / 3;
+            if (data[i + 3] > 100 && luma < 210) {
+              next.push({ x, y, ox: x, oy: y, vx: 0, vy: 0, size: 1.35, color });
+            }
+          }
+        }
+      }
+
+      if (next.length > 4200) {
+        const stride = Math.ceil(next.length / 4200);
+        particles = next.filter((_, index) => index % stride === 0);
+      } else {
+        particles = next;
+      }
+      return particles.length > 0;
+    };
+
+    const draw = () => {
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (const particle of particles) {
+        particle.vx += (particle.ox - particle.x) * 0.075;
+        particle.vy += (particle.oy - particle.y) * 0.075;
+        particle.vx *= 0.86;
+        particle.vy *= 0.86;
+        particle.x += particle.vx;
+        particle.y += particle.vy;
+        if (!leaving) {
+          const dx = particle.x - mouse.x;
+          const dy = particle.y - mouse.y;
+          const distance = Math.hypot(dx, dy);
+          if (distance < 54 && distance > 0.1) {
+            const force = ((54 - distance) / 54) * 3.4;
+            particle.vx += (dx / distance) * force;
+            particle.vy += (dy / distance) * force;
+          }
+        }
+        ctx.globalAlpha = 0.92;
+        ctx.fillStyle = particle.color;
+        ctx.fillRect(particle.x, particle.y, particle.size, particle.size);
+      }
+      ctx.globalAlpha = 1;
+    };
+
+    const settle = () => {
+      let max = 0;
+      for (const particle of particles) {
+        max = Math.max(max, Math.hypot(particle.x - particle.ox, particle.y - particle.oy));
+      }
+      if (leaving && max < 1.4) {
+        restore();
+        return;
+      }
+      frame = window.requestAnimationFrame(() => {
+        draw();
+        settle();
+      });
+    };
+
+    const restore = () => {
+      active = false;
+      leaving = false;
+      window.cancelAnimationFrame(frame);
+      canvas.style.opacity = "0";
+      hero.classList.remove("is-particles");
+      canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    };
+
+    const activate = () => {
+      if (active) return;
+      if (!build()) return;
+      window.clearTimeout(restoreTimer);
+      hero.classList.add("is-particles");
+      canvas.style.opacity = "1";
+      active = true;
+      leaving = false;
+      mouse.x = -9999;
+      mouse.y = -9999;
+      window.cancelAnimationFrame(frame);
+      settle();
+    };
+
+    hero.addEventListener("pointerenter", activate);
+    hero.addEventListener("pointermove", (event) => {
+      if (!active) return;
+      const rect = hero.getBoundingClientRect();
+      mouse.x = event.clientX - rect.left;
+      mouse.y = event.clientY - rect.top;
+    });
+    hero.addEventListener("pointerleave", () => {
+      if (!active) return;
+      leaving = true;
+      mouse.x = -9999;
+      mouse.y = -9999;
+    });
+    logo.addEventListener("load", () => {
+      if (active) restore();
+    });
+  };
+
   const handleMenuAction = (action) => {
     if (!action || typeof action !== "string") {
       return;
@@ -1953,6 +2114,8 @@
         if (event.target === switcherOverlay) closeSwitcher();
       });
     }
+
+    initParticleHero();
 
     send({ type: "chrome.ready" });
   };
