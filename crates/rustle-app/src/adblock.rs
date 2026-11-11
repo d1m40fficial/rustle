@@ -304,6 +304,21 @@ pub fn spawn_loader(proxy: EventLoopProxy<AppEvent>, force: bool, allow_network:
     });
 }
 
+pub fn build_custom(rules: &[String]) -> Option<FilterEngine> {
+    let text = rules
+        .iter()
+        .map(|rule| rule.trim())
+        .filter(|rule| !rule.is_empty() && !rule.starts_with('!'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text.is_empty() {
+        return None;
+    }
+    let mut set = FilterSet::new(false);
+    set.add_filter_list(text, ParseOptions::default());
+    Some(Engine::new_with_filter_set(set))
+}
+
 pub fn check(engine: &FilterEngine, url: &str, source_url: &str, request_type: &str) -> Match {
     let Ok(request) = Request::new(url, source_url, request_type, "get") else {
         return Match::Allow;

@@ -213,6 +213,12 @@
 
   const render = () => {
     document.documentElement.dataset.theme = current.theme === "light" ? "light" : "dark";
+    document.documentElement.lang = current.language === "en" ? "en" : "ru";
+    const en = current.language === "en";
+    const kicker = document.querySelector(".sidebar-kicker");
+    if (kicker) kicker.textContent = en ? "Tabs" : "Вкладки";
+    const newTab = byId("new-tab");
+    if (newTab) newTab.title = en ? "New tab (Ctrl+T)" : "Новая вкладка (Ctrl+T)";
     document.body.classList.toggle("collapsed", Boolean(current.sidebarCollapsed));
     document.body.classList.toggle("narrow", Number(current.sidebarWidth || 282) < 150);
     const count = byId("count");
@@ -222,7 +228,9 @@
     const collapse = byId("collapse");
     if (collapse) {
       collapse.textContent = current.sidebarCollapsed ? "›" : "‹";
-      collapse.title = current.sidebarCollapsed ? "Развернуть панель" : "Свернуть панель";
+      collapse.title = en
+        ? (current.sidebarCollapsed ? "Expand panel" : "Collapse panel")
+        : (current.sidebarCollapsed ? "Развернуть панель" : "Свернуть панель");
     }
 
     const container = byId("tabs");

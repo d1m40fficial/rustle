@@ -1,5 +1,5 @@
 #define MyAppName "Rustle"
-#define MyAppVersion "0.5.0"
+#define MyAppVersion "0.6.0"
 #define MyAppPublisher "Rustle"
 #define MyAppExeName "rustle.exe"
 #define WebView2Client "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"

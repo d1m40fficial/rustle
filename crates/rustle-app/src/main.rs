@@ -248,6 +248,7 @@ struct AppState {
     groups: Vec<TabGroup>,
     next_group_id: u64,
     adblock_engine: Option<adblock::FilterEngine>,
+    adblock_custom_engine: Option<adblock::FilterEngine>,
     adblock_info: adblock::AdblockInfo,
     prompt_open: bool,
     switcher_open: bool,
@@ -304,6 +305,7 @@ impl AppState {
             groups: Vec::new(),
             next_group_id: 1,
             adblock_engine: None,
+            adblock_custom_engine: None,
             adblock_info: adblock::AdblockInfo::default(),
             prompt_open: false,
             switcher_open: false,
@@ -712,6 +714,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
             "mode": mode,
             "internalPage": internal_page_name,
             "theme": if state.settings.theme == "light" { "light" } else { "dark" },
+            "language": state.settings.language,
             "private": state.private,
             "zoom": active.map(|tab| tab.zoom).unwrap_or(1.0),
             "vertical": state.vertical,
@@ -993,6 +996,48 @@ mod native_menu {
         });
     }
 
+    fn translate_menu_label(label: &str) -> String {
+        let exact = match label {
+            "Новая вкладка" => "New tab",
+            "Вернуть закрытую вкладку" => "Reopen closed tab",
+            "Библиотека сессий" => "Session library",
+            "Сохранить сессию…" => "Save session…",
+            "Открыть сессию…" => "Open session…",
+            "Сгруппировать по доменам" => "Group by domain",
+            "История" => "History",
+            "Закладки" => "Bookmarks",
+            "Загрузки" => "Downloads",
+            "Настройки" => "Settings",
+            "Добавить в закладки" => "Add bookmark",
+            "Отключить Adblock на этом сайте" => "Disable Adblock on this site",
+            "Сохранить страницу в PDF…" => "Save page as PDF…",
+            "Скриншот страницы…" => "Screenshot page…",
+            "Вертикальные вкладки" => "Vertical tabs",
+            "Закрепить вкладку" => "Pin tab",
+            "Открепить вкладку" => "Unpin tab",
+            "Выключить звук вкладки" => "Mute tab",
+            "Включить звук вкладки" => "Unmute tab",
+            "Новая группа…" => "New group…",
+            "Убрать из группы" => "Remove from group",
+            "Закрыть вкладку" => "Close tab",
+            "Развернуть группу" => "Expand group",
+            "Свернуть группу" => "Collapse group",
+            "Новая вкладка в группе" => "New tab in group",
+            "Сменить цвет группы" => "Change group color",
+            "Переименовать группу…" => "Rename group…",
+            "Удалить группу" => "Delete group",
+            "Без контейнера" => "No container",
+            _ => "",
+        };
+        if !exact.is_empty() {
+            return exact.to_owned();
+        }
+        if let Some(name) = label.strip_prefix("В группу «") {
+            return format!("Move to group «{}", name);
+        }
+        label.to_owned()
+    }
+
     fn app_items(state: &AppState, items: &mut Vec<Entry>) {
         push(items, "app.newtab", "Новая вкладка");
         push(items, "app.reopen", "Вернуть закрытую вкладку");
@@ -1024,7 +1069,7 @@ mod native_menu {
     }
 
     pub fn show(state: &Rc<RefCell<AppState>>, kind: Kind, origin: Origin, x: i32, y: i32) {
-        let (hwnd, owner, scale, entries) = {
+        let (hwnd, owner, scale, mut entries, language) = {
             let state = state.borrow();
             let scale = state.window.scale_factor();
             let owner = state.window.hwnd();
@@ -1145,8 +1190,13 @@ mod native_menu {
                     }
                 }
             }
-            (hwnd, owner, scale, entries)
+            (hwnd, owner, scale, entries, state.settings.language.clone())
         };
+        if language == "en" {
+            for entry in &mut entries {
+                entry.label = translate_menu_label(&entry.label);
+            }
+        }
 
         if entries.is_empty() {
             return;
@@ -4466,7 +4516,16 @@ fn install_adblock_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, tab
         if custom == Some(false) {
             return Ok(());
         }
-        let outcome = if custom == Some(true) {
+        let custom_engine_blocked = {
+            let state = state.borrow();
+            state.adblock_custom_engine.as_ref().is_some_and(|engine| {
+                matches!(
+                    adblock::check(engine, &url, &source_url, request_type),
+                    adblock::Match::Block
+                )
+            })
+        };
+        let outcome = if custom == Some(true) || custom_engine_blocked {
             adblock::Match::Block
         } else {
             let state = state.borrow();
@@ -5202,6 +5261,8 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 let _ = rustle_storage::save_settings(&settings);
             }
             state.borrow_mut().settings = settings;
+            let rules = state.borrow().settings.adblock_custom_rules.clone();
+            state.borrow_mut().adblock_custom_engine = adblock::build_custom(&rules);
             apply_layout(state);
             push_ui_state(state);
         }
@@ -5680,6 +5741,7 @@ fn main() -> wry::Result<()> {
         state.stress_cycles = stress_cycles;
         state.settings = settings.clone();
         state.webview2_version = webview2_version();
+        state.adblock_custom_engine = adblock::build_custom(&state.settings.adblock_custom_rules);
         state.private = private;
         state.vertical = settings.vertical_tabs;
         state.sidebar_collapsed = settings.sidebar_collapsed;
@@ -6078,8 +6140,17 @@ mod ipc_smoke_tests {
             "||ads.example.com^".to_owned(),
             "@@||good.example.com^".to_owned(),
         ];
-        assert_eq!(custom_adblock_match(&rules, "https://ads.example.com/a.js"), Some(true));
-        assert_eq!(custom_adblock_match(&rules, "https://good.example.com/a.js"), Some(false));
-        assert_eq!(custom_adblock_match(&rules, "https://example.com/app.js"), None);
+        assert_eq!(
+            custom_adblock_match(&rules, "https://ads.example.com/a.js"),
+            Some(true)
+        );
+        assert_eq!(
+            custom_adblock_match(&rules, "https://good.example.com/a.js"),
+            Some(false)
+        );
+        assert_eq!(
+            custom_adblock_match(&rules, "https://example.com/app.js"),
+            None
+        );
     }
 }

@@ -1035,17 +1035,186 @@
     document.documentElement.style.setProperty("--suggest-width", rect.width + "px");
   };
 
+  const EN_TEXT = {
+    "Библиотека сессий": "Session library",
+    "Минималистичный браузер. 0.5.0.": "Minimal browser. 0.5.0.",
+    "+ Добавить сайт": "+ Add site",
+    "✎ Редактировать плитки": "✎ Edit tiles",
+    "Вкладки, история, закладки и настройки уже работают.": "Tabs, history, bookmarks and settings already work.",
+    "Блокировка рекламы": "Ad blocking",
+    "Версия": "Version",
+    "Вкладки": "Tabs",
+    "Вкладки, история, закладки и настройки уже работают.": "Tabs, history, bookmarks and settings already work.",
+    "Восстанавливать вкладки": "Restore tabs",
+    "Восстанавливать сессию или открывать новую вкладку.": "Restore the session or open a new tab.",
+    "Вперёд": "Forward",
+    "Вперёд (Alt+→)": "Forward (Alt+→)",
+    "Данные": "Data",
+    "Движок": "Engine",
+    "Добавляйте страницы звездой в адресной строке.": "Add pages with the star in the address bar.",
+    "Домены через запятую — реклама на них не блокируется.": "Comma-separated domains where ads are not blocked.",
+    "Загрузка…": "Loading…",
+    "Загрузки": "Downloads",
+    "Закладки": "Bookmarks",
+    "Закреплённые вкладки": "Pinned tabs",
+    "Закрыть": "Close",
+    "Импорт HTML": "Import HTML",
+    "Импорт настроек": "Import settings",
+    "Интенсивность частиц": "Particle intensity",
+    "Исключения Adblock": "Adblock exceptions",
+    "Используется для запросов из адресной строки.": "Used for address-bar searches.",
+    "История": "History",
+    "Исходники": "Source code",
+    "Коллекция": "Collection",
+    "Контейнер новых вкладок": "New tab container",
+    "Контейнеры cookie": "Cookie containers",
+    "Масштаб — сбросить": "Zoom — reset",
+    "Меню": "Menu",
+    "Минималистичный браузер на Rust и WebView2. Без телеметрии и фоновой сетевой активности.": "A minimal Rust and WebView2 browser. No telemetry or background network activity.",
+    "На главную": "Home",
+    "Навигация": "Navigation",
+    "Назад": "Back",
+    "Назад (Alt+←)": "Back (Alt+←)",
+    "Название группы": "Group name",
+    "Название сессии": "Session name",
+    "Найти": "Find",
+    "Найти на странице": "Find in page",
+    "Настройки": "Settings",
+    "Не удалось открыть страницу": "Could not open the page",
+    "Новая вкладка": "New tab",
+    "Новая вкладка (Ctrl+T)": "New tab (Ctrl+T)",
+    "О браузере": "About",
+    "Обновить": "Reload",
+    "Обновить (F5)": "Reload (F5)",
+    "Обновления": "Updates",
+    "Оконный режим": "Window mode",
+    "Открывать новую вкладку": "Open a new tab",
+    "Отмена": "Cancel",
+    "Очистить cookies и кэш": "Clear cookies and cache",
+    "Очистить историю": "Clear history",
+    "Очищать при выходе": "Clear on exit",
+    "Ошибка загрузки": "Load error",
+    "По одному имени на строку.": "One name per line.",
+    "По одному правилу на строку. Поддерживаются домены, ||домен^ и @@исключения.": "One rule per line. Domains, ||domain^ and @@exceptions are supported.",
+    "Поведение": "Behavior",
+    "Повторить": "Retry",
+    "Поиск или адрес": "Search or address",
+    "Поиск по вкладкам…": "Search tabs…",
+    "Поиск по истории": "Search history",
+    "Поисковик": "Search engine",
+    "Полноценный Adblock: EasyList, EasyPrivacy и RU AdList, сетевые и косметические фильтры.": "Full Adblock: EasyList, EasyPrivacy and RU AdList, network and cosmetic filters.",
+    "Предыдущее": "Previous",
+    "При запуске": "On startup",
+    "Пробовать HTTPS для HTTP-адресов, кроме localhost.": "Try HTTPS for HTTP addresses except localhost.",
+    "Проверить обновления": "Check for updates",
+    "Проверьте адрес и подключение к интернету.": "Check the address and your internet connection.",
+    "Проект": "Project",
+    "Профиль WebView2 для новых вкладок.": "WebView2 profile for new tabs.",
+    "Распад логотипа и надписи Rustle.": "Disintegration of the Rustle logo and title.",
+    "Русский": "Russian",
+    "Русский или English.": "Russian or English.",
+    "Свернуть": "Minimize",
+    "Свернуть панель": "Collapse panel",
+    "Светлая": "Light",
+    "Светлая или тёмная оболочка браузера.": "Light or dark browser theme.",
+    "Свои правила Adblock": "Custom Adblock rules",
+    "Сессия восстановлена после сбоя": "Session restored after a crash",
+    "Системная": "System",
+    "Следующее": "Next",
+    "Сменить тему": "Toggle theme",
+    "Сохранить": "Save",
+    "Сохранить текущую": "Save current",
+    "Сохраняйте наборы вкладок с названием и превью.": "Save tab sets with a name and preview.",
+    "Тема": "Theme",
+    "Тёмная": "Dark",
+    "Удалять историю, сессию и данные WebView2 после закрытия.": "Delete history, session and WebView2 data on exit.",
+    "Файлы": "Files",
+    "Файлы сохраняются в папку «Загрузки». Отсюда можно открыть файл или папку.": "Files are saved to Downloads. You can open a file or folder here.",
+    "Фильтры Adblock": "Adblock filters",
+    "Частицы на главной": "Particles on home",
+    "Ширина боковой панели": "Sidebar width",
+    "Экспорт HTML": "Export HTML",
+    "Экспорт настроек": "Export settings",
+    "Язык интерфейса": "Interface language",
+    "Яндекс": "Yandex",
+    "Без контейнера": "No container",
+    "Добавить в закладки": "Add bookmark",
+    "Сохранить страницу в PDF…": "Save page as PDF…",
+    "Скриншот страницы…": "Screenshot page…",
+    "Отключить Adblock на этом сайте": "Disable Adblock on this site",
+    "Готово": "Done",
+    "Прервано": "Interrupted",
+    "Отменено": "Cancelled",
+    "Папка": "Folder",
+    "Открыть": "Open",
+    "Пауза": "Pause",
+    "Продолжить": "Resume",
+    "Отменить": "Cancel",
+    "Сессия": "Session",
+    "Сохранённых сессий пока нет.": "No saved sessions yet.",
+    "вкладок": "tabs"
+  };
+  const originalText = new WeakMap();
+  const originalAttrs = new WeakMap();
+  const translatedTexts = [];
+  const translatedAttrs = [];
+  let translating = false;
+  const translateDom = (enabled) => {
+    if (!enabled) return;
+    if (translating) return;
+    translating = true;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      if (!node.parentElement || node.parentElement.closest("script, style, #tabs, .newtab__shortcuts, .page-list")) continue;
+      if (!originalText.has(node)) {
+        originalText.set(node, node.nodeValue);
+        translatedTexts.push(node);
+      }
+      const original = originalText.get(node);
+      const key = original.trim();
+      if (!key || !EN_TEXT[key]) continue;
+      const leading = original.match(/^\s*/)[0];
+      const trailing = original.match(/\s*$/)[0];
+      node.nodeValue = leading + EN_TEXT[key] + trailing;
+    }
+    document.querySelectorAll("[title], [placeholder], [aria-label]").forEach((element) => {
+      if (element.closest("#tabs, .newtab__shortcuts, .page-list")) return;
+      if (!originalAttrs.has(element)) {
+        translatedAttrs.push(element);
+        originalAttrs.set(element, {
+          title: element.getAttribute("title"),
+          placeholder: element.getAttribute("placeholder"),
+          aria: element.getAttribute("aria-label"),
+        });
+      }
+      const saved = originalAttrs.get(element);
+      for (const [attr, original] of [["title", saved.title], ["placeholder", saved.placeholder], ["aria-label", saved.aria]]) {
+        if (!original) continue;
+        const translated = EN_TEXT[original.trim()];
+        if (translated) element.setAttribute(attr, original.replace(original.trim(), translated));
+      }
+    });
+    translating = false;
+  };
+  const restoreDom = () => {
+    for (const node of translatedTexts) {
+      const original = originalText.get(node);
+      if (original !== undefined) node.nodeValue = original;
+    }
+    for (const element of translatedAttrs) {
+      const saved = originalAttrs.get(element);
+      if (!saved) continue;
+      if (saved.title !== null) element.setAttribute("title", saved.title);
+      if (saved.placeholder !== null) element.setAttribute("placeholder", saved.placeholder);
+      if (saved.aria !== null) element.setAttribute("aria-label", saved.aria);
+    }
+  };
   const applyLanguage = (language) => {
     const en = language === "en";
     document.documentElement.lang = en ? "en" : "ru";
-    const tagline = document.querySelector(".newtab__tagline");
-    if (tagline) tagline.textContent = en ? "Minimal browser. 0.2.0." : "Минималистичный браузер. 0.2.0.";
-    const query = byId("newtab-query");
-    if (query) query.placeholder = en ? "Search or address" : "Поиск или адрес";
-    const add = byId("newtab-add");
-    if (add) add.textContent = en ? "+ Add site" : "+ Добавить сайт";
-    const edit = byId("newtab-edit");
-    if (edit && !tileEdit) edit.textContent = en ? "✎ Edit tiles" : "✎ Редактировать плитки";
+    if (en) translateDom(true);
+    else restoreDom();
   };
 
   const applyState = (payload) => {
