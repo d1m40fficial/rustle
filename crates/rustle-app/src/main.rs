@@ -3136,6 +3136,11 @@ fn resize_window_ipc(state: &Rc<RefCell<AppState>>, message: &Value, start: bool
                 right: rect.right,
                 bottom: rect.bottom,
             });
+            unsafe {
+                ReleaseCapture();
+                SendMessageW(hwnd, 0x00A1, edge as isize, 0);
+            }
+            state.borrow_mut().resize_session = None;
         } else if let Some(session) = &state.borrow().resize_session {
             let dx = screen_x - session.start_x;
             let dy = screen_y - session.start_y;
