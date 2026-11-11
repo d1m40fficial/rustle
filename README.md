@@ -4,15 +4,15 @@
 
 Минималистичный браузер на Rust: быстрый запуск, низкое потребление памяти, ничего лишнего.
 
-> Статус: **0.8.0**. Вкладки и группы, pin, вертикальный режим, полноценный Adblock,
+> Статус: **0.9.0**. Вкладки и группы, pin, вертикальный режим, полноценный Adblock,
 > favicon-плитки, история, закладки, загрузки и установщик.
 
 ![Rustle UX](docs/assets/ux.png)
 
 ## Установка
 
-- **Установщик** — [Rustle-0.8.0-setup.exe](https://github.com/d1m40fficial/rustle/releases/download/v0.8.0/Rustle-0.1.0-setup.exe), per-user, без прав администратора.
-- **Portable** — [Rustle-0.8.0-portable.zip](https://github.com/d1m40fficial/rustle/releases/download/v0.1.0/Rustle-0.1.0-portable.zip): распакуйте и запустите `rustle.exe`.
+- **Установщик** — [Rustle-0.9.0-setup.exe](https://github.com/d1m40fficial/rustle/releases/download/v0.9.0/Rustle-0.1.0-setup.exe), per-user, без прав администратора.
+- **Portable** — [Rustle-0.9.0-portable.zip](https://github.com/d1m40fficial/rustle/releases/download/v0.1.0/Rustle-0.1.0-portable.zip): распакуйте и запустите `rustle.exe`.
 - Требуется Windows 10/11 x64 и Microsoft Edge WebView2 Runtime.
 
 SHA256 — [SHA256SUMS.txt](https://github.com/d1m40fficial/rustle/releases/download/v0.1.0/SHA256SUMS.txt). История изменений — [CHANGELOG.md](CHANGELOG.md).
@@ -24,7 +24,7 @@ SHA256 — [SHA256SUMS.txt](https://github.com/d1m40fficial/rustle/releases/down
 - [Отчёт о возможностях движка](docs/spikes/engine-capabilities.md) — что проверено в M0.
 - [Производительность](docs/perf.md) — старт, память, размер.
 - [ADR](docs/adr) — принятые архитектурные решения.
-- [Release notes 0.8.0](docs/release-0.8.0.md).
+- [Release notes 0.9.0](docs/release-0.9.0.md).
 - [QA 0.1.0](docs/qa-0.1.0.md).
 
 ## Что это

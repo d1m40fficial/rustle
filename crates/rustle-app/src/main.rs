@@ -1443,6 +1443,16 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
     if sidebar_visible && !prompt_open && !switcher_open {
         raise_sidebar(state);
     }
+    #[cfg(target_os = "windows")]
+    if let Ok(overlays) = RESIZE_OVERLAYS.lock() {
+        for hwnd in overlays.iter() {
+            if *hwnd != 0 {
+                unsafe {
+                    SetWindowPos(*hwnd, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+                }
+            }
+        }
+    }
     if animation_finished {
         state.borrow_mut().layout_anim = None;
         let still_vertical = state.borrow().vertical;
@@ -5515,6 +5525,219 @@ unsafe extern "system" fn resize_mouse_hook(code: i32, wparam: usize, lparam: is
 }
 
 #[cfg(target_os = "windows")]
+static RESIZE_OVERLAYS: std::sync::Mutex<[isize; 8]> = std::sync::Mutex::new([0; 8]);
+
+#[cfg(target_os = "windows")]
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn CreateWindowExW(
+        ex_style: u32,
+        class_name: *const u16,
+        window_name: *const u16,
+        style: u32,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        parent: isize,
+        menu: isize,
+        instance: isize,
+        param: isize,
+    ) -> isize;
+    fn SetLayeredWindowAttributes(hwnd: isize, color: u32, alpha: u8, flags: u32) -> i32;
+    fn SetCapture(hwnd: isize) -> isize;
+    fn GetCapture() -> isize;
+    fn GetParent(hwnd: isize) -> isize;
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn overlay_proc(
+    hwnd: isize,
+    msg: u32,
+    wparam: usize,
+    lparam: isize,
+    id: usize,
+    _data: usize,
+) -> isize {
+    const WM_LBUTTONDOWN: u32 = 0x0201;
+    const WM_MOUSEMOVE: u32 = 0x0200;
+    const WM_LBUTTONUP: u32 = 0x0202;
+    if msg == WM_LBUTTONDOWN {
+        let parent = unsafe { GetParent(hwnd) };
+        let mut point = ResizePoint { x: 0, y: 0 };
+        let mut rect = ResizeRect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        unsafe {
+            GetCursorPos(&mut point);
+            GetWindowRect(parent, &mut rect);
+            SetCapture(hwnd);
+        }
+        let hit = id as i32;
+        RESIZE_MODE.store(hit, std::sync::atomic::Ordering::Relaxed);
+        RESIZE_HWND.store(parent, std::sync::atomic::Ordering::Relaxed);
+        RESIZE_START_X.store(point.x, std::sync::atomic::Ordering::Relaxed);
+        RESIZE_START_Y.store(point.y, std::sync::atomic::Ordering::Relaxed);
+        RESIZE_START_L.store(rect.left, std::sync::atomic::Ordering::Relaxed);
+        RESIZE_START_T.store(rect.top, std::sync::atomic::Ordering::Relaxed);
+        RESIZE_START_R.store(rect.right, std::sync::atomic::Ordering::Relaxed);
+        RESIZE_START_B.store(rect.bottom, std::sync::atomic::Ordering::Relaxed);
+        return 1;
+    }
+    if msg == WM_MOUSEMOVE && unsafe { GetCapture() } == hwnd {
+        let mode = RESIZE_MODE.load(std::sync::atomic::Ordering::Relaxed);
+        if mode != 0 {
+            let parent = RESIZE_HWND.load(std::sync::atomic::Ordering::Relaxed);
+            let mut point = ResizePoint { x: 0, y: 0 };
+            unsafe {
+                GetCursorPos(&mut point);
+            }
+            let dx = point.x - RESIZE_START_X.load(std::sync::atomic::Ordering::Relaxed);
+            let dy = point.y - RESIZE_START_Y.load(std::sync::atomic::Ordering::Relaxed);
+            let mut left = RESIZE_START_L.load(std::sync::atomic::Ordering::Relaxed);
+            let mut top = RESIZE_START_T.load(std::sync::atomic::Ordering::Relaxed);
+            let mut right = RESIZE_START_R.load(std::sync::atomic::Ordering::Relaxed);
+            let mut bottom = RESIZE_START_B.load(std::sync::atomic::Ordering::Relaxed);
+            if matches!(mode, 10 | 13 | 16) {
+                left += dx;
+            }
+            if matches!(mode, 11 | 14 | 17) {
+                right += dx;
+            }
+            if matches!(mode, 12..=14) {
+                top += dy;
+            }
+            if matches!(mode, 15..=17) {
+                bottom += dy;
+            }
+            if right - left < 720 {
+                if matches!(mode, 10 | 13 | 16) {
+                    left = right - 720;
+                } else {
+                    right = left + 720;
+                }
+            }
+            if bottom - top < 480 {
+                if matches!(mode, 12..=14) {
+                    top = bottom - 480;
+                } else {
+                    bottom = top + 480;
+                }
+            }
+            unsafe {
+                SetWindowPos(
+                    parent,
+                    0,
+                    left,
+                    top,
+                    right - left,
+                    bottom - top,
+                    0x0004 | 0x0010,
+                );
+            }
+            return 1;
+        }
+    }
+    if msg == WM_LBUTTONUP {
+        RESIZE_MODE.store(0, std::sync::atomic::Ordering::Relaxed);
+        unsafe {
+            ReleaseCapture();
+        }
+        return 1;
+    }
+    unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+}
+
+#[cfg(target_os = "windows")]
+fn layout_resize_overlays(parent: isize) {
+    let mut rect = ResizeRect {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    unsafe {
+        GetClientRect(parent, &mut rect);
+    }
+    let w = rect.right.max(0);
+    let h = rect.bottom.max(0);
+    let b = 10;
+    let specs = [
+        (0, 0, w, b, 12),
+        (0, h - b, w, b, 15),
+        (0, 0, b, h, 10),
+        (w - b, 0, b, h, 11),
+        (0, 0, 20, 20, 13),
+        (w - 20, 0, 20, 20, 14),
+        (0, h - 20, 20, 20, 16),
+        (w - 20, h - 20, 20, 20, 17),
+    ];
+    let overlays = RESIZE_OVERLAYS.lock().ok().map(|guard| *guard);
+    let Some(overlays) = overlays else {
+        return;
+    };
+    for (index, (x, y, width, height, _hit)) in specs.iter().enumerate() {
+        let hwnd = overlays[index];
+        if hwnd != 0 {
+            unsafe {
+                SetWindowPos(hwnd, 0, *x, *y, *width, *height, 0x0004 | 0x0010);
+                SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn install_resize_overlays(parent: isize) {
+    let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+    let title: Vec<u16> = "\0".encode_utf16().collect();
+    let specs = [
+        (0, 0, 100, 10, 12),
+        (0, 0, 100, 10, 15),
+        (0, 0, 10, 100, 10),
+        (0, 0, 10, 100, 11),
+        (0, 0, 20, 20, 13),
+        (0, 0, 20, 20, 14),
+        (0, 0, 20, 20, 16),
+        (0, 0, 20, 20, 17),
+    ];
+    let mut overlays = [0isize; 8];
+    for (index, (_, _, width, height, hit)) in specs.iter().enumerate() {
+        let hwnd = unsafe {
+            CreateWindowExW(
+                0x00080000 | 0x08000000,
+                class.as_ptr(),
+                title.as_ptr(),
+                0x40000000 | 0x10000000,
+                0,
+                0,
+                *width,
+                *height,
+                parent,
+                0,
+                0,
+                0,
+            )
+        };
+        if hwnd != 0 {
+            unsafe {
+                SetLayeredWindowAttributes(hwnd, 0, 1, 2);
+                SetWindowSubclass(hwnd, Some(overlay_proc), *hit as usize, 0);
+            }
+            overlays[index] = hwnd;
+        }
+    }
+    if let Ok(mut guard) = RESIZE_OVERLAYS.lock() {
+        *guard = overlays;
+    }
+    layout_resize_overlays(parent);
+}
+
+#[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn install_resize_mouse_hook(hwnd: isize) {
     RESIZE_HWND.store(hwnd, std::sync::atomic::Ordering::Relaxed);
     std::thread::spawn(|| unsafe {
@@ -5603,6 +5826,10 @@ unsafe extern "system" fn resize_subclass(
     const HTBOTTOMLEFT: isize = 16;
     const HTBOTTOMRIGHT: isize = 17;
     const BORDER: i32 = 10;
+
+    if msg == 0x0005 {
+        layout_resize_overlays(hwnd);
+    }
 
     if msg == WM_NCHITTEST {
         let mut point = ResizePoint { x: 0, y: 0 };
@@ -5889,7 +6116,7 @@ fn main() -> wry::Result<()> {
     window.set_undecorated_shadow(false);
     #[cfg(target_os = "windows")]
     enable_frameless_resize(&window);
-    install_resize_mouse_hook(window.hwnd());
+    install_resize_overlays(window.hwnd());
     mark("window");
 
     let stress_cycles = std::env::args().find_map(|arg| {
