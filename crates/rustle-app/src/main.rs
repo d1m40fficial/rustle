@@ -121,6 +121,7 @@ enum AppEvent {
     AdblockReady(adblock::AdblockEvent),
     Autosave,
     UpdateStatus(String),
+    RefreshResize,
     Vertical(bool),
     CreateGroup { name: String, tab: Option<TabId> },
     ToggleGroup(u64),
@@ -5361,6 +5362,184 @@ unsafe extern "system" {
 
 #[cfg(target_os = "windows")]
 #[repr(C)]
+struct LowMousePoint {
+    x: i32,
+    y: i32,
+}
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
+struct LowMsg {
+    hwnd: isize,
+    message: u32,
+    wparam: usize,
+    lparam: isize,
+    time: u32,
+    point: LowMousePoint,
+    private: u32,
+}
+
+#[cfg(target_os = "windows")]
+static RESIZE_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+static RESIZE_MODE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+static RESIZE_START_X: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+static RESIZE_START_Y: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+static RESIZE_START_L: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+static RESIZE_START_T: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+static RESIZE_START_R: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+static RESIZE_START_B: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+#[cfg(target_os = "windows")]
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn SetWindowsHookExW(
+        id: i32,
+        callback: Option<unsafe extern "system" fn(i32, usize, isize) -> isize>,
+        module: isize,
+        thread: u32,
+    ) -> isize;
+    fn CallNextHookEx(hook: isize, code: i32, wparam: usize, lparam: isize) -> isize;
+    fn GetMessageW(msg: *mut LowMsg, hwnd: isize, min: u32, max: u32) -> i32;
+    fn TranslateMessage(msg: *const LowMsg) -> i32;
+    fn DispatchMessageW(msg: *const LowMsg) -> isize;
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn resize_mouse_hook(code: i32, wparam: usize, lparam: isize) -> isize {
+    const WM_LBUTTONDOWN: usize = 0x0201;
+    const HTLEFT: usize = 10;
+    const HTRIGHT: usize = 11;
+    const HTTOP: usize = 12;
+    const HTTOPLEFT: usize = 13;
+    const HTTOPRIGHT: usize = 14;
+    const HTBOTTOM: usize = 15;
+    const HTBOTTOMLEFT: usize = 16;
+    const HTBOTTOMRIGHT: usize = 17;
+    const BORDER: i32 = 10;
+
+    if code >= 0 {
+        let hwnd = RESIZE_HWND.load(std::sync::atomic::Ordering::Relaxed);
+        if hwnd != 0 {
+            let mut point = ResizePoint { x: 0, y: 0 };
+            unsafe {
+                GetCursorPos(&mut point);
+            }
+            let mode = RESIZE_MODE.load(std::sync::atomic::Ordering::Relaxed);
+            if wparam == WM_LBUTTONDOWN {
+                let mut rect = ResizeRect {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                };
+                unsafe {
+                    GetWindowRect(hwnd, &mut rect);
+                }
+                let left = point.x < rect.left + BORDER;
+                let right = point.x >= rect.right - BORDER;
+                let top = point.y < rect.top + BORDER;
+                let bottom = point.y >= rect.bottom - BORDER;
+                let hit = match (left, right, top, bottom) {
+                    (true, _, true, _) => HTTOPLEFT,
+                    (_, true, true, _) => HTTOPRIGHT,
+                    (true, _, _, true) => HTBOTTOMLEFT,
+                    (_, true, _, true) => HTBOTTOMRIGHT,
+                    (true, _, _, _) => HTLEFT,
+                    (_, true, _, _) => HTRIGHT,
+                    (_, _, true, _) => HTTOP,
+                    (_, _, _, true) => HTBOTTOM,
+                    _ => 0,
+                };
+                if hit != 0 {
+                    RESIZE_MODE.store(hit as i32, std::sync::atomic::Ordering::Relaxed);
+                    RESIZE_START_X.store(point.x, std::sync::atomic::Ordering::Relaxed);
+                    RESIZE_START_Y.store(point.y, std::sync::atomic::Ordering::Relaxed);
+                    RESIZE_START_L.store(rect.left, std::sync::atomic::Ordering::Relaxed);
+                    RESIZE_START_T.store(rect.top, std::sync::atomic::Ordering::Relaxed);
+                    RESIZE_START_R.store(rect.right, std::sync::atomic::Ordering::Relaxed);
+                    RESIZE_START_B.store(rect.bottom, std::sync::atomic::Ordering::Relaxed);
+                    return 1;
+                }
+            } else if wparam == 0x0200 && mode != 0 {
+                let dx = point.x - RESIZE_START_X.load(std::sync::atomic::Ordering::Relaxed);
+                let dy = point.y - RESIZE_START_Y.load(std::sync::atomic::Ordering::Relaxed);
+                let mut left = RESIZE_START_L.load(std::sync::atomic::Ordering::Relaxed);
+                let mut top = RESIZE_START_T.load(std::sync::atomic::Ordering::Relaxed);
+                let mut right = RESIZE_START_R.load(std::sync::atomic::Ordering::Relaxed);
+                let mut bottom = RESIZE_START_B.load(std::sync::atomic::Ordering::Relaxed);
+                if matches!(mode, 10 | 13 | 16) {
+                    left += dx;
+                }
+                if matches!(mode, 11 | 14 | 17) {
+                    right += dx;
+                }
+                if matches!(mode, 12..=14) {
+                    top += dy;
+                }
+                if matches!(mode, 15..=17) {
+                    bottom += dy;
+                }
+                if right - left < 720 {
+                    if matches!(mode, 10 | 13 | 16) {
+                        left = right - 720;
+                    } else {
+                        right = left + 720;
+                    }
+                }
+                if bottom - top < 480 {
+                    if matches!(mode, 12..=14) {
+                        top = bottom - 480;
+                    } else {
+                        bottom = top + 480;
+                    }
+                }
+                unsafe {
+                    SetWindowPos(
+                        hwnd,
+                        0,
+                        left,
+                        top,
+                        right - left,
+                        bottom - top,
+                        0x0004 | 0x0010,
+                    );
+                }
+                return 1;
+            } else if wparam == 0x0202 && mode != 0 {
+                RESIZE_MODE.store(0, std::sync::atomic::Ordering::Relaxed);
+                return 1;
+            }
+        }
+    }
+    unsafe { CallNextHookEx(0, code, wparam, lparam) }
+}
+
+#[cfg(target_os = "windows")]
+fn install_resize_mouse_hook(hwnd: isize) {
+    RESIZE_HWND.store(hwnd, std::sync::atomic::Ordering::Relaxed);
+    std::thread::spawn(|| unsafe {
+        let hook = SetWindowsHookExW(14, Some(resize_mouse_hook), 0, 0);
+        if hook == 0 {
+            return;
+        }
+        let mut msg = LowMsg {
+            hwnd: 0,
+            message: 0,
+            wparam: 0,
+            lparam: 0,
+            time: 0,
+            point: LowMousePoint { x: 0, y: 0 },
+            private: 0,
+        };
+        while GetMessageW(&mut msg, 0, 0, 0) > 0 {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    });
+}
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
 struct ResizePoint {
     x: i32,
     y: i32,
@@ -5517,6 +5696,22 @@ fn attach_resize_passthrough(webview: &WebView) {
 }
 
 #[cfg(target_os = "windows")]
+#[cfg(target_os = "windows")]
+fn refresh_resize_passthrough(state: &Rc<RefCell<AppState>>) {
+    let state_ref = state.borrow();
+    if let Some(chrome) = &state_ref.chrome {
+        attach_resize_passthrough(chrome);
+    }
+    if let Some(sidebar) = &state_ref.sidebar {
+        attach_resize_passthrough(sidebar);
+    }
+    for tab in &state_ref.tabs {
+        if let Some(webview) = &tab.webview {
+            attach_resize_passthrough(webview);
+        }
+    }
+}
+
 fn enable_frameless_resize(window: &Window) {
     const GWL_STYLE: i32 = -16;
     const WS_THICKFRAME: isize = 0x0004_0000;
@@ -5694,6 +5889,7 @@ fn main() -> wry::Result<()> {
     window.set_undecorated_shadow(false);
     #[cfg(target_os = "windows")]
     enable_frameless_resize(&window);
+    install_resize_mouse_hook(window.hwnd());
     mark("window");
 
     let stress_cycles = std::env::args().find_map(|arg| {
@@ -5786,6 +5982,15 @@ fn main() -> wry::Result<()> {
     }
     mark("chrome");
     refresh_saved_sessions(&state);
+    {
+        let resize_proxy = proxy.clone();
+        std::thread::spawn(move || {
+            for _ in 0..6 {
+                std::thread::sleep(Duration::from_secs(1));
+                let _ = resize_proxy.send_event(AppEvent::RefreshResize);
+            }
+        });
+    }
 
     save_session_state(&state, false);
     if state.borrow().ready {
@@ -6026,6 +6231,10 @@ fn main() -> wry::Result<()> {
             }
             Event::UserEvent(AppEvent::Title(tab_id, title)) => {
                 on_title(&state, tab_id, title);
+            }
+            Event::UserEvent(AppEvent::RefreshResize) => {
+                #[cfg(target_os = "windows")]
+                refresh_resize_passthrough(&state);
             }
             Event::UserEvent(AppEvent::Autosave) => {
                 if state.borrow().ready {
