@@ -748,6 +748,42 @@
     return value.toFixed(index ? 1 : 0) + " " + units[index];
   };
 
+  const renderSessions = (items = current.sessions || []) => {
+    const list = byId("sessions-list");
+    if (!list) return;
+    list.replaceChildren();
+    if (!items.length) {
+      const empty = document.createElement("span");
+      empty.className = "page-hint";
+      empty.textContent = "Сохранённых сессий пока нет.";
+      list.append(empty);
+      return;
+    }
+    items.forEach((item) => {
+      const card = document.createElement("div");
+      card.className = "session-card";
+      const title = document.createElement("strong");
+      title.textContent = item.name || "Сессия";
+      const meta = document.createElement("small");
+      meta.textContent = (item.count || 0) + " вкладок · " + (item.preview || []).slice(0, 2).join(" / ");
+      const actions = document.createElement("div");
+      actions.className = "session-card__actions";
+      const open = document.createElement("button");
+      open.className = "button";
+      open.type = "button";
+      open.textContent = "Открыть";
+      open.addEventListener("click", () => send({ type: "sessions.load", id: item.id }));
+      const remove = document.createElement("button");
+      remove.className = "button";
+      remove.type = "button";
+      remove.textContent = "Удалить";
+      remove.addEventListener("click", () => send({ type: "sessions.delete", id: item.id }));
+      actions.append(open, remove);
+      card.append(title, meta, actions);
+      list.append(card);
+    });
+  };
+
   const renderDownloads = (items = current.downloads || []) => {
     const list = byId("downloads-list");
     if (!list) {
@@ -1026,6 +1062,16 @@
     if (payload.theme) {
       document.documentElement.dataset.theme = payload.theme;
     }
+    const aboutWebview = byId("about-webview2");
+    if (aboutWebview && payload.webview2Version) {
+      aboutWebview.textContent = payload.webview2Version;
+    }
+    const aboutUpdate = byId("update-status");
+    if (aboutUpdate && payload.updateStatus) {
+      aboutUpdate.textContent = payload.updateStatus;
+    }
+    if (false) {
+    }
     if (payload.language) {
       applyLanguage(payload.language);
     }
@@ -1108,6 +1154,9 @@
     document.documentElement.style.setProperty("--chrome-offset", payload.vertical ? "44px" : "78px");
     document.documentElement.style.setProperty("--toolbar-nav-left", Math.max(72, sideWidth) + "px");
     window.requestAnimationFrame(syncAddressOverlay);
+    if (Array.isArray(payload.sessions)) {
+      renderSessions(payload.sessions);
+    }
     if (Array.isArray(payload.bookmarks)) {
       current.bookmarks = payload.bookmarks;
       renderShortcuts();
@@ -1496,6 +1545,9 @@
         send({ type: "page.pdf" });
       } else if (name === "whitelist") {
         send({ type: "adblock.whitelist" });
+      } else if (name === "sessions") {
+        send({ type: "nav.go", url: "rustle://settings" });
+        send({ type: "sessions.refresh" });
       } else if (name === "session.save") {
         send({ type: "session.saveAs" });
       } else if (name === "session.open") {

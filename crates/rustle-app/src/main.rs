@@ -120,6 +120,7 @@ enum AppEvent {
     TileFavicons { request_id: u64, items: Value },
     AdblockReady(adblock::AdblockEvent),
     Autosave,
+    UpdateStatus(String),
     Vertical(bool),
     CreateGroup { name: String, tab: Option<TabId> },
     ToggleGroup(u64),
@@ -251,6 +252,9 @@ struct AppState {
     prompt_open: bool,
     switcher_open: bool,
     recovered: bool,
+    saved_sessions: Vec<Value>,
+    webview2_version: String,
+    update_status: String,
 }
 
 struct LayoutAnimation {
@@ -304,6 +308,9 @@ impl AppState {
             prompt_open: false,
             switcher_open: false,
             recovered: false,
+            saved_sessions: Vec::new(),
+            webview2_version: String::new(),
+            update_status: String::new(),
         }
     }
 
@@ -712,6 +719,9 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
             "sidebarWidth": state.settings.sidebar_width.clamp(72, SIDEBAR_WIDTH),
             "switcherOpen": state.switcher_open,
             "recovered": state.recovered,
+            "sessions": state.saved_sessions,
+            "webview2Version": state.webview2_version,
+            "updateStatus": state.update_status,
             "groups": state.groups.iter().map(|group| json!({"id": group.id, "name": group.name, "collapsed": group.collapsed})).collect::<Vec<_>>(),
             "secure": url.starts_with("https://"),
             "bookmarks": state.bookmarks,
@@ -987,6 +997,7 @@ mod native_menu {
         push(items, "app.newtab", "Новая вкладка");
         push(items, "app.reopen", "Вернуть закрытую вкладку");
         separator(items);
+        push(items, "app.sessions", "Библиотека сессий");
         push(items, "app.session.save", "Сохранить сессию…");
         push(items, "app.session.open", "Открыть сессию…");
         push(items, "app.autogroup", "Сгруппировать по доменам");
@@ -2437,6 +2448,139 @@ fn new_tab_in_group(state: &Rc<RefCell<AppState>>, group_id: u64) {
     focus_address(state);
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SavedSessionFile {
+    name: String,
+    saved_at: i64,
+    session: Session,
+}
+
+fn sessions_dir() -> PathBuf {
+    rustle_storage::data_dir().join("sessions")
+}
+
+fn refresh_saved_sessions(state: &Rc<RefCell<AppState>>) {
+    let mut items = Vec::new();
+    if let Ok(entries) = fs::read_dir(sessions_dir()) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(text) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(saved) = serde_json::from_str::<SavedSessionFile>(&text) else {
+                continue;
+            };
+            let id = path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default();
+            let preview: Vec<String> = saved
+                .session
+                .tabs
+                .iter()
+                .take(4)
+                .map(|tab| tab.title.clone())
+                .collect();
+            items.push(json!({
+                "id": id,
+                "name": saved.name,
+                "savedAt": saved.saved_at,
+                "count": saved.session.tabs.len(),
+                "preview": preview,
+            }));
+        }
+    }
+    items.sort_by_key(|item| {
+        item.get("savedAt")
+            .and_then(|value| value.as_i64())
+            .unwrap_or(0)
+    });
+    items.reverse();
+    state.borrow_mut().saved_sessions = items;
+    push_ui_state(state);
+}
+
+fn save_named_session(state: &Rc<RefCell<AppState>>, name: &str) {
+    let name = name.trim();
+    if name.is_empty() {
+        return;
+    }
+    save_session_state(state, false);
+    let Ok(text) = fs::read_to_string(rustle_storage::session_path()) else {
+        return;
+    };
+    let Ok(session) = serde_json::from_str::<Session>(&text) else {
+        return;
+    };
+    let _ = fs::create_dir_all(sessions_dir());
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or(0);
+    let safe: String = name
+        .chars()
+        .map(|ch| {
+            if ch.is_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let id = format!("{safe}-{stamp}");
+    let payload = SavedSessionFile {
+        name: name.to_owned(),
+        saved_at: stamp as i64,
+        session,
+    };
+    if let Ok(bytes) = serde_json::to_vec_pretty(&payload) {
+        let _ = fs::write(sessions_dir().join(format!("{id}.json")), bytes);
+    }
+    refresh_saved_sessions(state);
+}
+
+fn load_named_session(state: &Rc<RefCell<AppState>>, id: &str) {
+    if !id
+        .chars()
+        .all(|ch| ch.is_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return;
+    }
+    let path = sessions_dir().join(format!("{id}.json"));
+    let Ok(text) = fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(saved) = serde_json::from_str::<SavedSessionFile>(&text) else {
+        return;
+    };
+    {
+        let mut state_ref = state.borrow_mut();
+        state_ref.tabs.clear();
+        state_ref.closed.clear();
+        state_ref.groups.clear();
+        state_ref.active = TabId(0);
+    }
+    restore_session(state, Some(saved.session));
+    let active = state.borrow().active;
+    ensure_tab_webview(state, active);
+    apply_layout(state);
+    push_ui_state(state);
+}
+
+fn delete_named_session(state: &Rc<RefCell<AppState>>, id: &str) {
+    if !id
+        .chars()
+        .all(|ch| ch.is_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return;
+    }
+    let _ = fs::remove_file(sessions_dir().join(format!("{id}.json")));
+    refresh_saved_sessions(state);
+}
+
 fn save_session_as(state: &Rc<RefCell<AppState>>) {
     save_session_state(state, false);
     let Some(target) = rfd::FileDialog::new()
@@ -2476,6 +2620,42 @@ fn open_session_as(state: &Rc<RefCell<AppState>>) {
     ensure_tab_webview(state, active);
     apply_layout(state);
     push_ui_state(state);
+}
+
+fn check_updates(state: &Rc<RefCell<AppState>>) {
+    let proxy = state.borrow().proxy.clone();
+    std::thread::spawn(move || {
+        let status =
+            match ureq::get("https://api.github.com/repos/d1m40fficial/rustle/releases/latest")
+                .set("User-Agent", "Rustle")
+                .call()
+            {
+                Ok(response) => match response
+                    .into_string()
+                    .ok()
+                    .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+                {
+                    Some(value) => {
+                        let latest = value
+                            .get("tag_name")
+                            .and_then(|tag| tag.as_str())
+                            .unwrap_or("")
+                            .trim_start_matches('v')
+                            .to_owned();
+                        if latest.is_empty() {
+                            "Не удалось проверить обновления".to_owned()
+                        } else if latest != VERSION {
+                            format!("Доступна новая версия {latest} (у вас {VERSION})")
+                        } else {
+                            format!("У вас последняя версия {VERSION}")
+                        }
+                    }
+                    None => "Не удалось проверить обновления".to_owned(),
+                },
+                Err(_) => "Не удалось проверить обновления".to_owned(),
+            };
+        let _ = proxy.send_event(AppEvent::UpdateStatus(status));
+    });
 }
 
 fn screenshot_window(state: &Rc<RefCell<AppState>>) {
@@ -4752,6 +4932,23 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             find_in_page(state, text, forward);
         }
         Some("settings.export") => export_config(state),
+        Some("app.updateCheck") => check_updates(state),
+        Some("sessions.refresh") => refresh_saved_sessions(state),
+        Some("sessions.save") => {
+            if let Some(name) = message.get("name").and_then(|value| value.as_str()) {
+                save_named_session(state, name);
+            }
+        }
+        Some("sessions.load") => {
+            if let Some(id) = message.get("id").and_then(|value| value.as_str()) {
+                load_named_session(state, id);
+            }
+        }
+        Some("sessions.delete") => {
+            if let Some(id) = message.get("id").and_then(|value| value.as_str()) {
+                delete_named_session(state, id);
+            }
+        }
         Some("session.saveAs") => save_session_as(state),
         Some("adblock.whitelist") => whitelist_current(state),
         Some("page.pdf") => print_active_pdf(state),
@@ -5324,6 +5521,30 @@ fn schedule_private_cleanup(root: PathBuf) {
 }
 
 #[cfg(target_os = "windows")]
+fn webview2_version() -> String {
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    const CLIENT: &str = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+    let paths = [
+        format!("SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{CLIENT}"),
+        format!("SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\{CLIENT}"),
+    ];
+    for hive in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
+        let root = RegKey::predef(hive);
+        for path in &paths {
+            if let Ok(key) = root.open_subkey(path) {
+                if let Ok(version) = key.get_value::<String, _>("pv") {
+                    if !version.trim().is_empty() {
+                        return version;
+                    }
+                }
+            }
+        }
+    }
+    "не найдена".to_owned()
+}
+
+#[cfg(target_os = "windows")]
 fn webview2_runtime_installed() -> bool {
     use winreg::RegKey;
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
@@ -5458,6 +5679,7 @@ fn main() -> wry::Result<()> {
         let mut state = state.borrow_mut();
         state.stress_cycles = stress_cycles;
         state.settings = settings.clone();
+        state.webview2_version = webview2_version();
         state.private = private;
         state.vertical = settings.vertical_tabs;
         state.sidebar_collapsed = settings.sidebar_collapsed;
@@ -5501,11 +5723,15 @@ fn main() -> wry::Result<()> {
         create_sidebar(&state)?;
     }
     mark("chrome");
+    refresh_saved_sessions(&state);
 
     save_session_state(&state, false);
     if state.borrow().ready {
         send_app_info(&state);
         push_ui_state(&state);
+    }
+    if !private {
+        check_updates(&state);
     }
 
     window.set_visible(true);
@@ -5740,11 +5966,15 @@ fn main() -> wry::Result<()> {
                 on_title(&state, tab_id, title);
             }
             Event::UserEvent(AppEvent::Autosave) => {
-        if state.borrow().ready {
-            save_session_state(&state, false);
-        }
-    }
-    Event::UserEvent(AppEvent::AdblockReady(event)) => {
+                if state.borrow().ready {
+                    save_session_state(&state, false);
+                }
+            }
+            Event::UserEvent(AppEvent::UpdateStatus(status)) => {
+                state.borrow_mut().update_status = status;
+                push_ui_state(&state);
+            }
+            Event::UserEvent(AppEvent::AdblockReady(event)) => {
                 match event {
                     adblock::AdblockEvent::Status(info) => {
                         state.borrow_mut().adblock_info = info;
@@ -5836,4 +6066,20 @@ fn main() -> wry::Result<()> {
             _ => {}
         }
     });
+}
+
+#[cfg(test)]
+mod ipc_smoke_tests {
+    use super::*;
+
+    #[test]
+    fn custom_rules_block_and_allow() {
+        let rules = vec![
+            "||ads.example.com^".to_owned(),
+            "@@||good.example.com^".to_owned(),
+        ];
+        assert_eq!(custom_adblock_match(&rules, "https://ads.example.com/a.js"), Some(true));
+        assert_eq!(custom_adblock_match(&rules, "https://good.example.com/a.js"), Some(false));
+        assert_eq!(custom_adblock_match(&rules, "https://example.com/app.js"), None);
+    }
 }

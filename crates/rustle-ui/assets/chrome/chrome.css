@@ -1783,6 +1783,13 @@ html.vertical-mode .switcher-overlay {
   cursor: pointer;
   font-size: 16px;
 }
+.settings__session-create { display: flex; gap: 8px; width: min(520px, 100%); }
+.settings__session-create input { flex: 1; height: 32px; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text); }
+.sessions-list { display: flex; flex-direction: column; gap: 7px; margin-top: 10px; }
+.session-card { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 9px; border: 1px solid var(--border); border-radius: 8px; }
+.session-card strong { color: var(--text); font-size: 13px; }
+.session-card small { color: var(--faint); font-size: 11px; }
+.session-card__actions { grid-row: 1 / span 2; grid-column: 2; display: flex; gap: 6px; align-items: center; }
 .tab--compact {
   flex: 0 0 30px;
   width: 30px;

@@ -92,7 +92,7 @@
         <div class="newtab__brand">Rustle</div>
         <canvas class="newtab__particles" id="newtab-particles"></canvas>
       </div>
-      <p class="newtab__tagline">Минималистичный браузер. 0.4.0.</p>
+      <p class="newtab__tagline">Минималистичный браузер. 0.5.0.</p>
 
       <form class="newtab__search" id="newtab-search" role="search">
         <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
@@ -105,7 +105,7 @@
         <button class="newtab__add newtab__edit" id="newtab-edit" type="button">✎ Редактировать плитки</button>
       </div>
 
-      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.4.0</span></p>
+      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.5.0</span></p>
     </div>
   </section>
 
@@ -284,6 +284,17 @@
         </span>
         <input id="setting-clear-exit" type="checkbox">
       </label>
+      <div class="settings__row settings__row--stack">
+        <span>
+          <strong>Библиотека сессий</strong>
+          <small>Сохраняйте наборы вкладок с названием и превью.</small>
+        </span>
+        <div class="settings__session-create">
+          <input id="session-name" type="text" placeholder="Название сессии" autocomplete="off">
+          <button id="session-save" class="button" type="button">Сохранить текущую</button>
+        </div>
+        <div id="sessions-list" class="sessions-list"></div>
+      </div>
       <div class="settings__actions">
         <button class="button button--primary" type="submit">Сохранить</button>
         <button id="clear-data" class="button" type="button">Очистить cookies и кэш</button>
@@ -310,7 +321,8 @@
       <p>Минималистичный браузер на Rust и WebView2. Без телеметрии и фоновой сетевой активности.</p>
       <dl>
         <dt>Версия</dt><dd id="about-version">0.0.1</dd>
-        <dt>Движок</dt><dd>WebView2</dd>
+        <dt>Движок</dt><dd>WebView2 <span id="about-webview2">—</span></dd>
+        <dt>Обновления</dt><dd><button class="link" id="update-check" type="button">Проверить обновления</button> <span id="update-status"></span></dd>
         <dt>Исходники</dt><dd><button class="link" type="button" data-nav="https://github.com/d1m40fficial/rustle">github.com/d1m40fficial/rustle</button></dd>
       </dl>
     </div>
