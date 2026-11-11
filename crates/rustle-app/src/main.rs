@@ -6246,7 +6246,14 @@ fn main() -> wry::Result<()> {
 
     if !private && !single_instance::acquire() {
         let payload = single_instance::payload_from_args();
-        let _ = single_instance::notify_existing(&payload);
+        let notified = single_instance::notify_existing(&payload);
+        if !notified {
+            rfd::MessageDialog::new()
+                .set_title("Rustle")
+                .set_description("Rustle уже запущен. Если окно не открывается, завершите старый процесс rustle.exe в Диспетчере задач и запустите снова.")
+                .set_level(rfd::MessageLevel::Info)
+                .show();
+        }
         return Ok(());
     }
 

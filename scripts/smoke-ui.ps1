@@ -8,12 +8,17 @@ if (-not $Exe) {
     $Exe = Join-Path $candidate.FullName "rustle.exe"
 }
 $Exe = (Resolve-Path $Exe).Path
-Write-Host "Starting $Exe"
-$process = Start-Process $Exe -WorkingDirectory (Split-Path $Exe) -PassThru
-Start-Sleep -Seconds 8
-if ($process.HasExited) { throw "Rustle exited during smoke test" }
-$alive = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
-if (-not $alive) { throw "Rustle process not found" }
-Write-Host "Smoke OK: PID $($process.Id), version $((Get-Item $Exe).VersionInfo.ProductVersion)"
-Stop-Process -Id $process.Id -Force
-Read-Host "Press Enter to close"
+try {
+    Write-Host "Starting $Exe (private profile)"
+    $process = Start-Process $Exe -ArgumentList "--private" -WorkingDirectory (Split-Path $Exe) -PassThru
+    Start-Sleep -Seconds 8
+    if ($process.HasExited) { throw "Rustle exited during smoke test" }
+    $alive = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
+    if (-not $alive) { throw "Rustle process not found" }
+    Write-Host "Smoke OK: PID $($process.Id), version $((Get-Item $Exe).VersionInfo.ProductVersion)"
+    Stop-Process -Id $process.Id -Force
+} catch {
+    Write-Host "SMOKE FAILED: $($_.Exception.Message)" -ForegroundColor Red
+} finally {
+    Read-Host "Press Enter to close"
+}
