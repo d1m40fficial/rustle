@@ -35,7 +35,8 @@ use tao::{
 };
 use url::Url;
 use wry::{
-    NewWindowResponse, PageLoadEvent, Rect, WebContext, WebView, WebViewBuilder, WebViewId,
+    MemoryUsageLevel, NewWindowResponse, PageLoadEvent, Rect, WebContext, WebView, WebViewBuilder,
+    WebViewId,
     dpi::{LogicalPosition, LogicalSize},
     http::{Request, Response},
 };
@@ -80,6 +81,38 @@ const SIDEBAR_WIDTH: u32 = 282;
 const SIDEBAR_COLLAPSED: u32 = 56;
 const CHROME_URL: &str = "rustle://localhost/chrome/index.html";
 const NEWTAB_URL: &str = "rustle://localhost/newtab/index.html";
+
+const RESIZE_JS: &str = r#"(function(){
+  if (window.__rustleResizeInstalled) return;
+  window.__rustleResizeInstalled = true;
+  var edgeSize = 10;
+  var edges = [
+    {edge: 11, css: "top:0;right:0;width:10px;height:100%;cursor:ew-resize"},
+    {edge: 10, css: "top:0;left:0;width:10px;height:100%;cursor:ew-resize"},
+    {edge: 15, css: "left:0;bottom:0;width:100%;height:10px;cursor:ns-resize"},
+    {edge: 17, css: "right:0;bottom:0;width:20px;height:20px;cursor:nwse-resize"},
+    {edge: 16, css: "left:0;bottom:0;width:20px;height:20px;cursor:nesw-resize"}
+  ];
+  edges.forEach(function(item){
+    var node = document.createElement("div");
+    node.style.cssText = "position:fixed;z-index:2147483647;touch-action:none;" + item.css;
+    node.addEventListener("pointerdown", function(event){
+      event.preventDefault();
+      node.setPointerCapture(event.pointerId);
+      if (window.ipc) window.ipc.postMessage(JSON.stringify({type:"window.resizeStart", edge:item.edge, screenX:event.screenX, screenY:event.screenY}));
+    });
+    node.addEventListener("pointermove", function(event){
+      if (!node.hasPointerCapture(event.pointerId)) return;
+      if (window.ipc) window.ipc.postMessage(JSON.stringify({type:"window.resizeMove", screenX:event.screenX, screenY:event.screenY}));
+    });
+    node.addEventListener("pointerup", function(event){
+      if (node.hasPointerCapture(event.pointerId)) node.releasePointerCapture(event.pointerId);
+      if (window.ipc) window.ipc.postMessage(JSON.stringify({type:"window.resizeEnd"}));
+    });
+    document.documentElement.appendChild(node);
+  });
+})();"#;
+
 const SIDEBAR_URL: &str = "rustle://localhost/sidebar/index.html";
 const MAX_IPC_BYTES: usize = 64 * 1024;
 const MAX_CLOSED_TABS: usize = 25;
@@ -257,6 +290,7 @@ struct AppState {
     saved_sessions: Vec<Value>,
     webview2_version: String,
     update_status: String,
+    resize_session: Option<ResizeSession>,
 }
 
 struct LayoutAnimation {
@@ -314,6 +348,7 @@ impl AppState {
             saved_sessions: Vec::new(),
             webview2_version: String::new(),
             update_status: String::new(),
+            resize_session: None,
         }
     }
 
@@ -1589,6 +1624,13 @@ fn on_page_load(state: &Rc<RefCell<AppState>>, tab_id: TabId, event: PageLoadEve
                 .unwrap_or_default();
             fetch_site_favicon(state, tab_id, &page_url);
             apply_cosmetic_filters(state, tab_id);
+            if let Some(webview) = state
+                .borrow()
+                .tab(tab_id)
+                .and_then(|tab| tab.webview.as_ref())
+            {
+                let _ = webview.evaluate_script(RESIZE_JS);
+            }
             let proxy = state.borrow().proxy.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(1800));
@@ -2227,6 +2269,21 @@ fn error_info(
     }
 }
 
+#[cfg(target_os = "windows")]
+fn apply_tab_memory_levels(state: &Rc<RefCell<AppState>>) {
+    let state_ref = state.borrow();
+    for tab in &state_ref.tabs {
+        if let Some(webview) = &tab.webview {
+            let level = if tab.id == state_ref.active {
+                MemoryUsageLevel::Normal
+            } else {
+                MemoryUsageLevel::Low
+            };
+            let _ = webview.set_memory_usage_level(level);
+        }
+    }
+}
+
 fn activate_tab(state: &Rc<RefCell<AppState>>, id: TabId) {
     let exists = state.borrow().tab(id).is_some();
     if !exists {
@@ -2236,6 +2293,8 @@ fn activate_tab(state: &Rc<RefCell<AppState>>, id: TabId) {
     let previous = state.borrow().active;
     if previous == id {
         ensure_tab_webview(state, id);
+        #[cfg(target_os = "windows")]
+        apply_tab_memory_levels(state);
         apply_layout(state);
         focus_active_content(state);
         push_ui_state(state);
@@ -2251,6 +2310,8 @@ fn activate_tab(state: &Rc<RefCell<AppState>>, id: TabId) {
 
     state.borrow_mut().active = id;
     ensure_tab_webview(state, id);
+    #[cfg(target_os = "windows")]
+    apply_tab_memory_levels(state);
     apply_layout(state);
     focus_active_content(state);
     push_ui_state(state);
@@ -2683,6 +2744,7 @@ fn open_session_as(state: &Rc<RefCell<AppState>>) {
     push_ui_state(state);
 }
 
+#[allow(dead_code)]
 fn check_updates(state: &Rc<RefCell<AppState>>) {
     let proxy = state.borrow().proxy.clone();
     std::thread::spawn(move || {
@@ -3023,6 +3085,103 @@ fn set_tab_container(state: &Rc<RefCell<AppState>>, id: TabId, container: &str) 
     push_ui_state(state);
     ensure_tab_webview(state, id);
     save_session_due(state);
+}
+
+struct ResizeSession {
+    edge: i32,
+    start_x: i32,
+    start_y: i32,
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+fn resize_window_ipc(state: &Rc<RefCell<AppState>>, message: &Value, start: bool, end: bool) {
+    #[cfg(target_os = "windows")]
+    {
+        let hwnd = state.borrow().window.hwnd();
+        if end {
+            state.borrow_mut().resize_session = None;
+            return;
+        }
+        let screen_x = message
+            .get("screenX")
+            .and_then(|value| value.as_i64())
+            .unwrap_or(0) as i32;
+        let screen_y = message
+            .get("screenY")
+            .and_then(|value| value.as_i64())
+            .unwrap_or(0) as i32;
+        if start {
+            let mut rect = ResizeRect {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            unsafe {
+                GetWindowRect(hwnd, &mut rect);
+            }
+            let edge = message
+                .get("edge")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(0) as i32;
+            state.borrow_mut().resize_session = Some(ResizeSession {
+                edge,
+                start_x: screen_x,
+                start_y: screen_y,
+                left: rect.left,
+                top: rect.top,
+                right: rect.right,
+                bottom: rect.bottom,
+            });
+        } else if let Some(session) = &state.borrow().resize_session {
+            let dx = screen_x - session.start_x;
+            let dy = screen_y - session.start_y;
+            let mut left = session.left;
+            let mut top = session.top;
+            let mut right = session.right;
+            let mut bottom = session.bottom;
+            if matches!(session.edge, 10 | 13 | 16) {
+                left += dx;
+            }
+            if matches!(session.edge, 11 | 14 | 17) {
+                right += dx;
+            }
+            if matches!(session.edge, 12..=14) {
+                top += dy;
+            }
+            if matches!(session.edge, 15..=17) {
+                bottom += dy;
+            }
+            if right - left < 720 {
+                if matches!(session.edge, 10 | 13 | 16) {
+                    left = right - 720;
+                } else {
+                    right = left + 720;
+                }
+            }
+            if bottom - top < 480 {
+                if matches!(session.edge, 12..=14) {
+                    top = bottom - 480;
+                } else {
+                    bottom = top + 480;
+                }
+            }
+            unsafe {
+                SetWindowPos(
+                    hwnd,
+                    0,
+                    left,
+                    top,
+                    right - left,
+                    bottom - top,
+                    0x0004 | 0x0010,
+                );
+            }
+        }
+    }
 }
 
 fn move_tab(state: &Rc<RefCell<AppState>>, tab_id: TabId, target_id: TabId) {
@@ -5002,7 +5161,6 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             find_in_page(state, text, forward);
         }
         Some("settings.export") => export_config(state),
-        Some("app.updateCheck") => check_updates(state),
         Some("sessions.refresh") => refresh_saved_sessions(state),
         Some("sessions.save") => {
             if let Some(name) = message.get("name").and_then(|value| value.as_str()) {
@@ -5025,6 +5183,9 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
         Some("page.screenshot") => screenshot_window(state),
         Some("session.openAs") => open_session_as(state),
         Some("settings.import") => import_config(state),
+        Some("window.resizeStart") => resize_window_ipc(state, &message, true, false),
+        Some("window.resizeMove") => resize_window_ipc(state, &message, false, false),
+        Some("window.resizeEnd") => resize_window_ipc(state, &message, false, true),
         Some("ui.switcher") => {
             let open = message
                 .get("open")
@@ -5691,6 +5852,7 @@ fn layout_resize_overlays(parent: isize) {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn install_resize_overlays(parent: isize) {
     let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
     let title: Vec<u16> = "\0".encode_utf16().collect();
@@ -6116,7 +6278,6 @@ fn main() -> wry::Result<()> {
     window.set_undecorated_shadow(false);
     #[cfg(target_os = "windows")]
     enable_frameless_resize(&window);
-    install_resize_overlays(window.hwnd());
     mark("window");
 
     let stress_cycles = std::env::args().find_map(|arg| {
@@ -6223,9 +6384,6 @@ fn main() -> wry::Result<()> {
     if state.borrow().ready {
         send_app_info(&state);
         push_ui_state(&state);
-    }
-    if !private {
-        check_updates(&state);
     }
 
     window.set_visible(true);

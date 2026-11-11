@@ -268,5 +268,22 @@
 
   byId("collapse").addEventListener("click", () => send({ type: "sidebar.collapse" }));
   byId("new-tab").addEventListener("click", () => send({ type: "tabs.new" }));
+  document.querySelectorAll(".resize-edge").forEach((node) => {
+    const edge = Number(node.dataset.edge);
+    node.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      node.setPointerCapture(event.pointerId);
+      send({ type: "window.resizeStart", edge, screenX: event.screenX, screenY: event.screenY });
+    });
+    node.addEventListener("pointermove", (event) => {
+      if (!node.hasPointerCapture(event.pointerId)) return;
+      send({ type: "window.resizeMove", screenX: event.screenX, screenY: event.screenY });
+    });
+    node.addEventListener("pointerup", (event) => {
+      if (node.hasPointerCapture(event.pointerId)) node.releasePointerCapture(event.pointerId);
+      send({ type: "window.resizeEnd" });
+    });
+  });
+
   send({ type: "sidebar.ready" });
 })();

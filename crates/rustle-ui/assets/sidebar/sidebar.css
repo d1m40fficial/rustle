@@ -667,3 +667,6 @@ body.narrow .tab-group__head {
 body.narrow .sidebar-tab {
   min-height: 38px;
 }
+
+.resize-overlay { position: fixed; inset: 0; z-index: 2147483600; pointer-events: none; }
+.resize-edge { position: absolute; pointer-events: auto; touch-action: none; }

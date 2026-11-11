@@ -92,7 +92,7 @@
         <div class="newtab__brand">Rustle</div>
         <canvas class="newtab__particles" id="newtab-particles"></canvas>
       </div>
-      <p class="newtab__tagline">Минималистичный браузер. 0.9.0.</p>
+      <p class="newtab__tagline">Минималистичный браузер. 0.10.0.</p>
 
       <form class="newtab__search" id="newtab-search" role="search">
         <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
@@ -105,7 +105,7 @@
         <button class="newtab__add newtab__edit" id="newtab-edit" type="button">✎ Редактировать плитки</button>
       </div>
 
-      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.9.0</span></p>
+      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.10.0</span></p>
     </div>
   </section>
 
@@ -322,7 +322,6 @@
       <dl>
         <dt>Версия</dt><dd id="about-version">0.0.1</dd>
         <dt>Движок</dt><dd>WebView2 <span id="about-webview2">—</span></dd>
-        <dt>Обновления</dt><dd><button class="link" id="update-check" type="button">Проверить обновления</button> <span id="update-status"></span></dd>
         <dt>Исходники</dt><dd><button class="link" type="button" data-nav="https://github.com/d1m40fficial/rustle">github.com/d1m40fficial/rustle</button></dd>
       </dl>
     </div>
@@ -350,6 +349,14 @@
       <div class="switcher__list" id="switcher-list"></div>
     </div>
   </div>
+  <div class="resize-overlay" aria-hidden="true">
+    <div class="resize-edge" data-edge="12" style="top:0;left:0;right:0;height:10px;cursor:ns-resize"></div>
+    <div class="resize-edge" data-edge="10" style="top:0;left:0;bottom:0;width:10px;cursor:ew-resize"></div>
+    <div class="resize-edge" data-edge="11" style="top:0;right:0;bottom:0;width:10px;cursor:ew-resize"></div>
+    <div class="resize-edge" data-edge="13" style="top:0;left:0;width:20px;height:20px;cursor:nwse-resize"></div>
+    <div class="resize-edge" data-edge="14" style="top:0;right:0;width:20px;height:20px;cursor:nesw-resize"></div>
+  </div>
+
   <div class="prompt-overlay" id="prompt-overlay" hidden>
     <div class="prompt-card" role="dialog" aria-modal="true">
       <p class="prompt-title" id="prompt-title">Название группы</p>

@@ -1853,3 +1853,5 @@ html.vertical-mode .switcher-overlay {
   width: 180px;
   accent-color: var(--accent);
 }
+.resize-overlay { position: fixed; inset: 0; z-index: 2147483600; pointer-events: none; }
+.resize-edge { position: absolute; pointer-events: auto; touch-action: none; }
