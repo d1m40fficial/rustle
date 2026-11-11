@@ -211,6 +211,7 @@ struct DownloadEntry {
     received: i64,
     total: i64,
     state: String,
+    paused: bool,
     #[cfg(target_os = "windows")]
     operation: Option<ICoreWebView2DownloadOperation>,
 }
@@ -479,7 +480,9 @@ fn effective_tab_title(tab: &Tab) -> String {
 fn push_tab(state: &mut AppState, url: String, title: String) -> TabId {
     let id = TabId(state.next_tab_id);
     state.next_tab_id += 1;
-    state.tabs.push(Tab::new(id, url, title));
+    let mut tab = Tab::new(id, url, title);
+    tab.container = state.settings.default_container.clone();
+    state.tabs.push(tab);
     id
 }
 
@@ -716,6 +719,10 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                 "searchEngine": state.settings.search_engine,
                 "theme": state.settings.theme,
                 "language": state.settings.language,
+                "particlesEnabled": state.settings.particles_enabled,
+                "particleIntensity": state.settings.particle_intensity,
+                "containers": state.settings.containers,
+                "defaultContainer": state.settings.default_container,
                 "startup": state.settings.startup,
                 "httpsFirst": state.settings.https_first,
                 "clearOnExit": state.settings.clear_on_exit,
@@ -2473,17 +2480,42 @@ fn open_session_as(state: &Rc<RefCell<AppState>>) {
 
 fn screenshot_window(state: &Rc<RefCell<AppState>>) {
     let Some(path) = rfd::FileDialog::new()
-        .set_title("Сохранить скриншот")
+        .set_title("Сохранить скриншот страницы")
         .add_filter("PNG", &["png"])
         .set_file_name("rustle-screenshot.png")
         .save_file()
     else {
         return;
     };
-    let hwnd = state.borrow().window.hwnd();
+    let hwnd = {
+        let state = state.borrow();
+        state
+            .active_tab()
+            .and_then(|tab| tab.webview.as_ref())
+            .map(|view| view.hwnd().0 as isize)
+    };
+    let Some(hwnd) = hwnd else {
+        return;
+    };
+    let mut rect = ResizeRect {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    unsafe {
+        GetWindowRect(hwnd, &mut rect);
+    }
+    let width = rect.right - rect.left;
+    let height = rect.bottom - rect.top;
+    if width <= 0 || height <= 0 {
+        return;
+    }
     let escaped = path.to_string_lossy().replace('\'', "''");
     let script = format!(
-        "$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.Drawing; Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class W {{ [StructLayout(LayoutKind.Sequential)] public struct R {{ public int L,T,Ri,B; }} [DllImport(\"user32.dll\")] public static extern bool GetWindowRect(IntPtr h, out R r); }}'; $r=New-Object W+R; [W]::GetWindowRect([IntPtr]{hwnd},[ref]$r)|Out-Null; $w=$r.Ri-$r.L; $h=$r.B-$r.T; if($w -le 0 -or $h -le 0){{exit}}; $bmp=New-Object System.Drawing.Bitmap $w,$h; $g=[System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($r.L,$r.T,0,0,(New-Object System.Drawing.Size $w,$h)); $bmp.Save('{escaped}',[System.Drawing.Imaging.ImageFormat]::Png); $g.Dispose(); $bmp.Dispose()"
+        "$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.Drawing; $bmp=New-Object System.Drawing.Bitmap {width},{height}; $g=[System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen({left},{top},0,0,(New-Object System.Drawing.Size {width},{height})); $bmp.Save('{escaped}',[System.Drawing.Imaging.ImageFormat]::Png); $g.Dispose(); $bmp.Dispose()",
+        left = rect.left,
+        top = rect.top
     );
     let _ = ProcessCommand::new("powershell")
         .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script])
@@ -3101,6 +3133,7 @@ fn downloads_payload(state: &AppState) -> Value {
                 "received": download.received,
                 "total": download.total,
                 "state": download.state,
+                "paused": download.paused,
             })
         })
         .collect();
@@ -3254,6 +3287,7 @@ fn install_download_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, _t
                 received: 0,
                 total: 0,
                 state: "progress".to_owned(),
+                paused: false,
                 operation: Some(operation.clone()),
             });
             id
@@ -4793,6 +4827,29 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             adblock::spawn_loader(proxy, true, true);
         }
         Some("data.clear") => clear_browsing_data(state),
+        Some("downloads.pause") => {
+            if let Some(id) = message.get("id").and_then(|value| value.as_u64()) {
+                if let Some(download) = state
+                    .borrow_mut()
+                    .downloads
+                    .iter_mut()
+                    .find(|entry| entry.id == id)
+                {
+                    #[cfg(target_os = "windows")]
+                    if let Some(operation) = &download.operation {
+                        unsafe {
+                            if download.paused {
+                                let _ = operation.Resume();
+                            } else {
+                                let _ = operation.Pause();
+                            }
+                        }
+                        download.paused = !download.paused;
+                    }
+                }
+                push_ui_state(state);
+            }
+        }
         Some("downloads.cancel") => {
             if let Some(id) = message.get("id").and_then(|value| value.as_u64()) {
                 let mut cancelled = false;
@@ -4874,6 +4931,36 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 if matches!(value, "ru" | "en") {
                     settings.language = value.to_owned();
                 }
+            }
+            if let Some(value) = message
+                .get("particlesEnabled")
+                .and_then(|value| value.as_bool())
+            {
+                settings.particles_enabled = value;
+            }
+            if let Some(values) = message.get("containers").and_then(|value| value.as_array()) {
+                settings.containers = values
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .map(|value| value.trim().to_lowercase())
+                    .filter(|value| !value.is_empty())
+                    .collect();
+            }
+            if let Some(value) = message
+                .get("defaultContainer")
+                .and_then(|value| value.as_str())
+            {
+                settings.default_container = if value.is_empty() || value == "none" {
+                    None
+                } else {
+                    Some(value.to_owned())
+                };
+            }
+            if let Some(value) = message
+                .get("particleIntensity")
+                .and_then(|value| value.as_u64())
+            {
+                settings.particle_intensity = (value as u32).clamp(40, 200);
             }
             if let Some(value) = message.get("startup").and_then(|value| value.as_str()) {
                 if matches!(value, "restore" | "newtab") {
@@ -5038,6 +5125,11 @@ unsafe extern "system" {
     fn GetClientRect(hwnd: isize, rect: *mut ResizeRect) -> i32;
     fn GetWindowRect(hwnd: isize, rect: *mut ResizeRect) -> i32;
     fn GetAncestor(hwnd: isize, flags: u32) -> isize;
+    fn EnumChildWindows(
+        hwnd: isize,
+        callback: Option<unsafe extern "system" fn(isize, isize) -> i32>,
+        data: isize,
+    ) -> i32;
 }
 
 #[cfg(target_os = "windows")]
@@ -5150,9 +5242,19 @@ unsafe extern "system" fn child_hit_subclass(
 }
 
 #[cfg(target_os = "windows")]
+unsafe extern "system" fn attach_child_callback(hwnd: isize, _data: isize) -> i32 {
+    unsafe {
+        SetWindowSubclass(hwnd, Some(child_hit_subclass), 3, 0);
+    }
+    1
+}
+
+#[cfg(target_os = "windows")]
 fn attach_resize_passthrough(webview: &WebView) {
     unsafe {
-        SetWindowSubclass(webview.hwnd().0 as isize, Some(child_hit_subclass), 2, 0);
+        let hwnd = webview.hwnd().0 as isize;
+        SetWindowSubclass(hwnd, Some(child_hit_subclass), 2, 0);
+        EnumChildWindows(hwnd, Some(attach_child_callback), 0);
     }
 }
 
@@ -5709,6 +5811,7 @@ fn main() -> wry::Result<()> {
                         received: record.received,
                         total: record.total,
                         state: record.state,
+                        paused: false,
                         #[cfg(target_os = "windows")]
                         operation: None,
                     })

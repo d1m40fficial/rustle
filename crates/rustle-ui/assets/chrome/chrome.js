@@ -1094,6 +1094,10 @@
     const error = payload.error;
 
     document.documentElement.classList.toggle("newtab-mode", newtab);
+    window.__rustleParticles?.[newtab ? "start" : "stop"]?.();
+    if (payload.settings) {
+      window.__rustleParticles?.configure(payload.settings);
+    }
     document.documentElement.classList.toggle("internal-mode", internal);
     document.documentElement.classList.toggle("error-mode", Boolean(error));
     document.documentElement.classList.toggle("vertical-mode", Boolean(payload.vertical));
@@ -1221,11 +1225,29 @@
     const input = byId("switcher-input");
     if (!list || !input) return;
     const query = input.value.trim().toLowerCase();
-    const tabs = (current.tabs || []).filter((tab) => {
-      const title = String(tab.title || "").toLowerCase();
-      const url = String(tab.url || "").toLowerCase();
-      return !query || title.includes(query) || url.includes(query);
-    });
+    const fuzzy = (text, needle) => {
+      if (!needle) return 1;
+      let index = 0;
+      let score = 0;
+      for (const char of text) {
+        if (char === needle[index]) {
+          score += index === 0 ? 3 : 1;
+          index += 1;
+          if (index === needle.length) return score;
+        }
+      }
+      return -1;
+    };
+    const tabs = (current.tabs || [])
+      .map((tab, index) => {
+        const title = String(tab.title || "").toLowerCase();
+        const url = String(tab.url || "").toLowerCase();
+        const score = Math.max(fuzzy(title, query), fuzzy(url, query) - 2);
+        return { tab, score, index };
+      })
+      .filter((entry) => entry.score >= 0)
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .map((entry) => entry.tab);
     switcherItems = tabs;
     switcherIndex = Math.min(switcherIndex, Math.max(0, tabs.length - 1));
     list.replaceChildren();
@@ -1281,8 +1303,11 @@
     let particles = [];
     let active = false;
     let frame = 0;
-    let leaving = false;
-    let restoreTimer = 0;
+    let enabled = true;
+    let intensity = 100;
+    let appliedEnabled = true;
+    let appliedIntensity = 100;
+    let rebuildTimer = 0;
     const mouse = { x: -9999, y: -9999 };
 
     const build = () => {
@@ -1295,8 +1320,8 @@
       const color = getComputedStyle(brand).color;
       const logoRect = logo.getBoundingClientRect();
       const brandRect = brand.getBoundingClientRect();
+      const step = intensity >= 150 ? 1 : intensity <= 60 ? 3 : 2;
       const next = [];
-      const step = 2;
 
       const textCanvas = document.createElement("canvas");
       textCanvas.width = width;
@@ -1323,9 +1348,7 @@
       logoCanvas.height = height;
       const logoCtx = logoCanvas.getContext("2d", { willReadFrequently: true });
       if (logoCtx) {
-        const lw = logoRect.width;
-        const lh = logoRect.height;
-        logoCtx.drawImage(logo, logoRect.left - rect.left, logoRect.top - rect.top, lw, lh);
+        logoCtx.drawImage(logo, logoRect.left - rect.left, logoRect.top - rect.top, logoRect.width, logoRect.height);
         const data = logoCtx.getImageData(0, 0, width, height).data;
         for (let y = 0; y < height; y += step) {
           for (let x = 0; x < width; x += step) {
@@ -1338,8 +1361,8 @@
         }
       }
 
-      if (next.length > 4200) {
-        const stride = Math.ceil(next.length / 4200);
+      if (next.length > 5200) {
+        const stride = Math.ceil(next.length / 5200);
         particles = next.filter((_, index) => index % stride === 0);
       } else {
         particles = next;
@@ -1358,15 +1381,13 @@
         particle.vy *= 0.86;
         particle.x += particle.vx;
         particle.y += particle.vy;
-        if (!leaving) {
-          const dx = particle.x - mouse.x;
-          const dy = particle.y - mouse.y;
-          const distance = Math.hypot(dx, dy);
-          if (distance < 54 && distance > 0.1) {
-            const force = ((54 - distance) / 54) * 3.4;
-            particle.vx += (dx / distance) * force;
-            particle.vy += (dy / distance) * force;
-          }
+        const dx = particle.x - mouse.x;
+        const dy = particle.y - mouse.y;
+        const distance = Math.hypot(dx, dy);
+        if (distance < 54 && distance > 0.1) {
+          const force = ((54 - distance) / 54) * 3.4;
+          particle.vx += (dx / distance) * force;
+          particle.vy += (dy / distance) * force;
         }
         ctx.globalAlpha = 0.92;
         ctx.fillStyle = particle.color;
@@ -1375,60 +1396,76 @@
       ctx.globalAlpha = 1;
     };
 
-    const settle = () => {
-      let max = 0;
-      for (const particle of particles) {
-        max = Math.max(max, Math.hypot(particle.x - particle.ox, particle.y - particle.oy));
-      }
-      if (leaving && max < 1.4) {
-        restore();
+    const loop = () => {
+      draw();
+      frame = window.requestAnimationFrame(loop);
+    };
+
+    const start = () => {
+      if (!enabled || active) return;
+      if (!build()) {
+        window.setTimeout(start, 250);
         return;
       }
-      frame = window.requestAnimationFrame(() => {
-        draw();
-        settle();
-      });
-    };
-
-    const restore = () => {
-      active = false;
-      leaving = false;
-      window.cancelAnimationFrame(frame);
-      canvas.style.opacity = "0";
-      hero.classList.remove("is-particles");
-      canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
-    };
-
-    const activate = () => {
-      if (active) return;
-      if (!build()) return;
-      window.clearTimeout(restoreTimer);
       hero.classList.add("is-particles");
       canvas.style.opacity = "1";
       active = true;
-      leaving = false;
-      mouse.x = -9999;
-      mouse.y = -9999;
       window.cancelAnimationFrame(frame);
-      settle();
+      loop();
     };
 
-    hero.addEventListener("pointerenter", activate);
+    const stop = () => {
+      active = false;
+      window.cancelAnimationFrame(frame);
+      hero.classList.remove("is-particles");
+      canvas.style.opacity = "0";
+      canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    };
+
+    const configure = (settings) => {
+      if (!settings) return;
+      if (typeof settings.particlesEnabled === "boolean") enabled = settings.particlesEnabled;
+      if (settings.particleIntensity) intensity = Number(settings.particleIntensity);
+      if (enabled === appliedEnabled && intensity === appliedIntensity) return;
+      appliedEnabled = enabled;
+      appliedIntensity = intensity;
+      if (!enabled) {
+        stop();
+        return;
+      }
+      if (active) {
+        stop();
+        window.setTimeout(start, 20);
+      }
+    };
+
     hero.addEventListener("pointermove", (event) => {
-      if (!active) return;
+      if (!active) start();
       const rect = hero.getBoundingClientRect();
       mouse.x = event.clientX - rect.left;
       mouse.y = event.clientY - rect.top;
     });
     hero.addEventListener("pointerleave", () => {
-      if (!active) return;
-      leaving = true;
       mouse.x = -9999;
       mouse.y = -9999;
     });
     logo.addEventListener("load", () => {
-      if (active) restore();
+      if (enabled) {
+        stop();
+        window.setTimeout(start, 20);
+      }
     });
+    window.addEventListener("resize", () => {
+      window.clearTimeout(rebuildTimer);
+      rebuildTimer = window.setTimeout(() => {
+        if (enabled) {
+          stop();
+          start();
+        }
+      }, 180);
+    });
+    window.__rustleParticles = { start, stop, configure };
+    window.setTimeout(start, 200);
   };
 
   const handleMenuAction = (action) => {

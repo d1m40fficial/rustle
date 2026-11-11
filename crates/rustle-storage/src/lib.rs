@@ -59,6 +59,10 @@ pub struct Settings {
     pub theme: String,
     #[serde(default = "default_language")]
     pub language: String,
+    #[serde(default = "default_true")]
+    pub particles_enabled: bool,
+    #[serde(default = "default_particle_intensity")]
+    pub particle_intensity: u32,
     #[serde(default = "default_startup")]
     pub startup: String,
     #[serde(default)]
@@ -77,6 +81,10 @@ pub struct Settings {
     pub adblock_exceptions: Vec<String>,
     #[serde(default)]
     pub adblock_custom_rules: Vec<String>,
+    #[serde(default = "default_containers")]
+    pub containers: Vec<String>,
+    #[serde(default)]
+    pub default_container: Option<String>,
 }
 
 fn default_search_engine() -> String {
@@ -89,6 +97,14 @@ fn default_theme() -> String {
 
 fn default_language() -> String {
     "ru".to_owned()
+}
+
+fn default_particle_intensity() -> u32 {
+    100
+}
+
+fn default_containers() -> Vec<String> {
+    vec!["personal".to_owned(), "work".to_owned(), "bank".to_owned()]
 }
 
 fn default_startup() -> String {
@@ -118,6 +134,8 @@ impl Default for Settings {
             search_engine: default_search_engine(),
             theme: default_theme(),
             language: default_language(),
+            particles_enabled: true,
+            particle_intensity: default_particle_intensity(),
             startup: default_startup(),
             https_first: false,
             clear_on_exit: false,
@@ -127,6 +145,8 @@ impl Default for Settings {
             sidebar_width: default_sidebar_width(),
             adblock_exceptions: default_adblock_exceptions(),
             adblock_custom_rules: Vec::new(),
+            containers: default_containers(),
+            default_container: None,
         }
     }
 }
