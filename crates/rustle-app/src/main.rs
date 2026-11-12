@@ -153,6 +153,7 @@ enum AppEvent {
     TileFavicons { request_id: u64, items: Value },
     AdblockReady(adblock::AdblockEvent),
     Autosave,
+    Maintenance,
     UpdateStatus(String),
     RefreshResize,
     Vertical(bool),
@@ -195,6 +196,7 @@ struct Tab {
     cosmetic_generic: bool,
     cosmetic_exceptions: HashSet<String>,
     cosmetic_injected: HashSet<String>,
+    last_active: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -229,6 +231,7 @@ impl Tab {
             cosmetic_generic: true,
             cosmetic_exceptions: HashSet::new(),
             cosmetic_injected: HashSet::new(),
+            last_active: Instant::now(),
         }
     }
 }
@@ -779,6 +782,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                 "clearOnExit": state.settings.clear_on_exit,
                 "adblock": state.settings.adblock,
                 "adblockExceptions": state.settings.adblock_exceptions,
+                "autoSuspendMinutes": state.settings.auto_suspend_minutes,
             },
             "adblockStatus": state.adblock_info.to_json(),
             "adblockExceptions": state.settings.adblock_exceptions,
@@ -2313,7 +2317,13 @@ fn activate_tab(state: &Rc<RefCell<AppState>>, id: TabId) {
         }
     }
 
-    state.borrow_mut().active = id;
+    {
+        let mut state_ref = state.borrow_mut();
+        state_ref.active = id;
+        if let Some(tab) = state_ref.tab_mut(id) {
+            tab.last_active = Instant::now();
+        }
+    }
     ensure_tab_webview(state, id);
     #[cfg(target_os = "windows")]
     apply_tab_memory_levels(state);
@@ -2628,6 +2638,34 @@ fn refresh_saved_sessions(state: &Rc<RefCell<AppState>>) {
     items.reverse();
     state.borrow_mut().saved_sessions = items;
     push_ui_state(state);
+}
+
+fn suspend_idle_tabs(state: &Rc<RefCell<AppState>>) {
+    let minutes = state.borrow().settings.auto_suspend_minutes;
+    if minutes == 0 {
+        return;
+    }
+    let active = state.borrow().active;
+    let limit = Duration::from_secs(minutes as u64 * 60);
+    let mut suspended = 0usize;
+    {
+        let mut state_ref = state.borrow_mut();
+        for tab in &mut state_ref.tabs {
+            if tab.id != active
+                && !tab.pinned
+                && tab.webview.is_some()
+                && tab.last_active.elapsed() >= limit
+            {
+                let _ = tab.webview.take();
+                tab.loading = false;
+                suspended += 1;
+            }
+        }
+    }
+    if suspended > 0 {
+        push_ui_state(state);
+        save_session_due(state);
+    }
 }
 
 fn unload_inactive_tabs(state: &Rc<RefCell<AppState>>) {
@@ -5445,6 +5483,12 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                     .filter(|value| !value.is_empty())
                     .collect();
             }
+            if let Some(minutes) = message
+                .get("autoSuspendMinutes")
+                .and_then(|value| value.as_u64())
+            {
+                settings.auto_suspend_minutes = minutes.min(240) as u32;
+            }
             if let Some(values) = message
                 .get("adblockExceptions")
                 .and_then(|value| value.as_array())
@@ -6426,10 +6470,15 @@ fn main() -> wry::Result<()> {
     {
         let autosave_proxy = proxy.clone();
         std::thread::spawn(move || {
+            let mut ticks = 0u32;
             loop {
                 std::thread::sleep(Duration::from_secs(5));
                 if autosave_proxy.send_event(AppEvent::Autosave).is_err() {
                     break;
+                }
+                ticks += 1;
+                if ticks % 12 == 0 {
+                    let _ = autosave_proxy.send_event(AppEvent::Maintenance);
                 }
             }
         });
@@ -6726,6 +6775,11 @@ fn main() -> wry::Result<()> {
             Event::UserEvent(AppEvent::RefreshResize) => {
                 #[cfg(target_os = "windows")]
                 refresh_resize_passthrough(&state);
+            }
+            Event::UserEvent(AppEvent::Maintenance) => {
+                if state.borrow().ready {
+                    suspend_idle_tabs(&state);
+                }
             }
             Event::UserEvent(AppEvent::Autosave) => {
                 if state.borrow().ready {

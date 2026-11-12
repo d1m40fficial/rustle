@@ -42,7 +42,7 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}".TrimStart("v")
-          if (-not $version -or $version -eq "main") { $version = "0.17.0" }
+          if (-not $version -or $version -eq "main") { $version = "0.18.0" }
           ./scripts/build-release.ps1 -Version $version
 
       - name: Smoke test portable
@@ -63,4 +63,4 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           if (-not $tag.StartsWith("v")) { $tag = "v$tag" }
-          gh release create $tag dist/Rustle-*-setup.exe dist/Rustle-*-portable.zip dist/SHA256SUMS.txt --title "Rustle $tag" --notes-file docs/release-0.17.0.md
+          gh release create $tag dist/Rustle-*-setup.exe dist/Rustle-*-portable.zip dist/SHA256SUMS.txt --title "Rustle $tag" --notes-file docs/release-0.18.0.md

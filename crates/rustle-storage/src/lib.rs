@@ -93,6 +93,8 @@ pub struct Settings {
     pub window_x: Option<i32>,
     #[serde(default)]
     pub window_y: Option<i32>,
+    #[serde(default = "default_auto_suspend")]
+    pub auto_suspend_minutes: u32,
 }
 
 fn default_search_engine() -> String {
@@ -121,6 +123,10 @@ fn default_startup() -> String {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_auto_suspend() -> u32 {
+    30
 }
 
 fn default_sidebar_width() -> u32 {
@@ -159,6 +165,7 @@ impl Default for Settings {
             window_height: None,
             window_x: None,
             window_y: None,
+            auto_suspend_minutes: default_auto_suspend(),
         }
     }
 }
