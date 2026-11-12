@@ -928,6 +928,13 @@
     if (customRules) {
       customRules.value = (settings.adblockCustomRules || []).join("\n");
     }
+    const autosaveField = (element) => {
+      if (!element || element.dataset.adblockAutosave === "1") return;
+      element.dataset.adblockAutosave = "1";
+      element.addEventListener("change", () => byId("settings-form")?.requestSubmit());
+    };
+    autosaveField(exceptions);
+    autosaveField(customRules);
     const status = byId("settings-status");
     if (status) {
       status.textContent = "";

@@ -878,6 +878,8 @@ fn sync_tab_from_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
 unsafe extern "system" {
     fn ReleaseCapture() -> i32;
     fn SendMessageW(hwnd: isize, msg: u32, wparam: isize, lparam: isize) -> isize;
+    fn ShowWindow(hwnd: isize, command: i32) -> i32;
+    fn SetForegroundWindow(hwnd: isize) -> i32;
     fn SetWindowPos(
         hwnd: isize,
         insert_after: isize,
@@ -3136,9 +3138,10 @@ fn resize_window_ipc(state: &Rc<RefCell<AppState>>, message: &Value, start: bool
                 right: rect.right,
                 bottom: rect.bottom,
             });
+            let lparam = ((screen_y as isize) << 16) | (screen_x as isize & 0xffff);
             unsafe {
                 ReleaseCapture();
-                SendMessageW(hwnd, 0x00A1, edge as isize, 0);
+                SendMessageW(hwnd, 0x00A1, edge as isize, lparam);
             }
             state.borrow_mut().resize_session = None;
         } else if let Some(session) = &state.borrow().resize_session {
@@ -6611,6 +6614,11 @@ fn main() -> wry::Result<()> {
                     let window = state.borrow().window.clone();
                     window.set_minimized(false);
                     window.set_visible(true);
+                    #[cfg(target_os = "windows")]
+                    unsafe {
+                        ShowWindow(window.hwnd(), 9);
+                        SetForegroundWindow(window.hwnd());
+                    }
                     window.set_focus();
                 }
                 focus_active_content(&state);
