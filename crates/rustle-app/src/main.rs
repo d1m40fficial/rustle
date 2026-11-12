@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![recursion_limit = "256"]
 
 //! Rustle desktop browser.
 
@@ -808,6 +809,8 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                 "adblock": state.settings.adblock,
                 "adblockExceptions": state.settings.adblock_exceptions,
                 "autoSuspendMinutes": state.settings.auto_suspend_minutes,
+                "toolbarHidden": state.settings.toolbar_hidden,
+                "toolbarHidden": state.settings.toolbar_hidden,
             },
             "adblockStatus": state.adblock_info.to_json(),
             "blockedLog": state.blocked_log,
@@ -5615,6 +5618,16 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 .and_then(|value| value.as_u64())
             {
                 settings.auto_suspend_minutes = minutes.min(240) as u32;
+            }
+            if let Some(values) = message
+                .get("toolbarHidden")
+                .and_then(|value| value.as_array())
+            {
+                settings.toolbar_hidden = values
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .map(|value| value.to_owned())
+                    .collect();
             }
             if let Some(values) = message
                 .get("adblockExceptions")

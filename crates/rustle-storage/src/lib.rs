@@ -95,6 +95,8 @@ pub struct Settings {
     pub window_y: Option<i32>,
     #[serde(default = "default_auto_suspend")]
     pub auto_suspend_minutes: u32,
+    #[serde(default)]
+    pub toolbar_hidden: Vec<String>,
 }
 
 fn default_search_engine() -> String {
@@ -166,6 +168,7 @@ impl Default for Settings {
             window_x: None,
             window_y: None,
             auto_suspend_minutes: default_auto_suspend(),
+            toolbar_hidden: Vec::new(),
         }
     }
 }

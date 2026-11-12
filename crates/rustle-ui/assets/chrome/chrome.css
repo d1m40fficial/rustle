@@ -1887,3 +1887,6 @@ html.vertical-mode .switcher-overlay {
 .blocked-row { padding: 5px 7px; border: 1px solid var(--border); border-radius: 6px; color: var(--faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .session-card__cover { grid-column: 1 / -1; height: 42px; border-radius: 6px; }
+
+.toolbar-toggles { display: flex; gap: 14px; flex-wrap: wrap; }
+.toolbar-toggles label { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: 12px; }

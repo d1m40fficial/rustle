@@ -92,7 +92,7 @@
         <div class="newtab__brand">Rustle</div>
         <canvas class="newtab__particles" id="newtab-particles"></canvas>
       </div>
-      <p class="newtab__tagline">Минималистичный браузер. 0.24.0.</p>
+      <p class="newtab__tagline">Минималистичный браузер. 0.25.0.</p>
 
       <form class="newtab__search" id="newtab-search" role="search">
         <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
@@ -105,7 +105,7 @@
         <button class="newtab__add newtab__edit" id="newtab-edit" type="button">✎ Редактировать плитки</button>
       </div>
 
-      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.24.0</span></p>
+      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.25.0</span></p>
     </div>
   </section>
 
@@ -303,6 +303,17 @@
           <small>Последние заблокированные запросы.</small>
         </span>
         <div id="blocked-list" class="blocked-list"></div>
+      </div>
+      <div class="settings__row settings__row--stack">
+        <span>
+          <strong>Кнопки панели</strong>
+          <small>Что показывать в верхней панели.</small>
+        </span>
+        <div class="toolbar-toggles">
+          <label><input type="checkbox" id="toolbar-translate"> Переводчик</label>
+          <label><input type="checkbox" id="toolbar-downloads"> Загрузки</label>
+          <label><input type="checkbox" id="toolbar-theme"> Тема</label>
+        </div>
       </div>
       <div class="settings__actions">
         <button class="button button--primary" type="submit">Сохранить</button>

@@ -1347,6 +1347,15 @@
     }
     if (false) {
     }
+    const toolbarHidden = payload.settings?.toolbarHidden || [];
+    const toolbarMap = {
+      translate: byId("translate-page"),
+      downloads: document.querySelector('[data-nav="rustle://downloads"]'),
+      theme: byId("theme-toggle"),
+    };
+    Object.entries(toolbarMap).forEach(([key, node]) => {
+      if (node) node.hidden = toolbarHidden.includes(key);
+    });
     if (payload.language) {
       applyLanguage(payload.language);
     }
