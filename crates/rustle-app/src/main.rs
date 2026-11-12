@@ -2588,6 +2588,8 @@ fn new_tab_in_group(state: &Rc<RefCell<AppState>>, group_id: u64) {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct SavedSessionFile {
     name: String,
+    #[serde(default)]
+    tags: Vec<String>,
     saved_at: i64,
     session: Session,
 }
@@ -2627,6 +2629,7 @@ fn refresh_saved_sessions(state: &Rc<RefCell<AppState>>) {
                 "savedAt": saved.saved_at,
                 "count": saved.session.tabs.len(),
                 "preview": preview,
+                "tags": saved.tags,
             }));
         }
     }
@@ -2683,7 +2686,7 @@ fn unload_inactive_tabs(state: &Rc<RefCell<AppState>>) {
     save_session_due(state);
 }
 
-fn save_named_session(state: &Rc<RefCell<AppState>>, name: &str) {
+fn save_named_session(state: &Rc<RefCell<AppState>>, name: &str, tags: &[String]) {
     let name = name.trim();
     if name.is_empty() {
         return;
@@ -2713,6 +2716,7 @@ fn save_named_session(state: &Rc<RefCell<AppState>>, name: &str) {
     let id = format!("{safe}-{stamp}");
     let payload = SavedSessionFile {
         name: name.to_owned(),
+        tags: tags.to_vec(),
         saved_at: stamp as i64,
         session,
     };
@@ -3869,7 +3873,18 @@ fn favicon_data(name: &str) -> Option<String> {
 
 fn cached_favicon(url: &str) -> Option<String> {
     let name = favicon_name(url);
-    favicon_cache_path(&name).exists().then_some(name)
+    let path = favicon_cache_path(&name);
+    let metadata = fs::metadata(&path).ok()?;
+    let stale = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.elapsed().ok())
+        .is_some_and(|age| age > Duration::from_secs(30 * 24 * 60 * 60));
+    if stale {
+        let _ = fs::remove_file(&path);
+        return None;
+    }
+    Some(name)
 }
 
 #[cfg(target_os = "windows")]
@@ -5229,7 +5244,19 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
         Some("sessions.refresh") => refresh_saved_sessions(state),
         Some("sessions.save") => {
             if let Some(name) = message.get("name").and_then(|value| value.as_str()) {
-                save_named_session(state, name);
+                let tags: Vec<String> = message
+                    .get("tags")
+                    .and_then(|value| value.as_array())
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(|value| value.as_str())
+                            .map(|value| value.trim().to_owned())
+                            .filter(|value| !value.is_empty())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                save_named_session(state, name, &tags);
             }
         }
         Some("sessions.load") => {

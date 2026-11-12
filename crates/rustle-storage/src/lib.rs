@@ -645,16 +645,17 @@ pub fn save_session_to(path: &Path, session: &Session) -> std::io::Result<()> {
 mod tests {
     use super::{Settings, Storage};
 
-
     #[test]
     fn settings_roundtrip_keeps_geometry_and_suspend() {
-        let mut settings = Settings::default();
-        settings.window_width = Some(1440);
-        settings.window_height = Some(900);
-        settings.window_x = Some(40);
-        settings.window_y = Some(60);
-        settings.auto_suspend_minutes = 15;
-        settings.language = "en".to_owned();
+        let settings = Settings {
+            window_width: Some(1440),
+            window_height: Some(900),
+            window_x: Some(40),
+            window_y: Some(60),
+            auto_suspend_minutes: 15,
+            language: "en".to_owned(),
+            ..Settings::default()
+        };
 
         let encoded = serde_json::to_string(&settings).expect("serialize settings");
         let decoded: Settings = serde_json::from_str(&encoded).expect("deserialize settings");

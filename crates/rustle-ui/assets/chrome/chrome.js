@@ -759,13 +759,17 @@
       list.append(empty);
       return;
     }
+    const filter = (byId("session-filter")?.value || "").trim().toLowerCase();
+    const visible = items.filter((item) => !filter || (item.name + " " + (item.tags || []).join(" ")).toLowerCase().includes(filter));
+    items = visible;
     items.forEach((item) => {
       const card = document.createElement("div");
       card.className = "session-card";
       const title = document.createElement("strong");
       title.textContent = item.name || "Сессия";
       const meta = document.createElement("small");
-      meta.textContent = (item.count || 0) + " вкладок · " + (item.preview || []).slice(0, 2).join(" / ");
+      const tagText = (item.tags || []).length ? " · " + item.tags.join(", ") : "";
+      meta.textContent = (item.count || 0) + " вкладок · " + (item.preview || []).slice(0, 2).join(" / ") + tagText;
       const actions = document.createElement("div");
       actions.className = "session-card__actions";
       const open = document.createElement("button");
@@ -783,6 +787,27 @@
       list.append(card);
     });
   };
+
+  const sessionSave = byId("session-save");
+  if (sessionSave) {
+    sessionSave.addEventListener("click", () => {
+      const nameInput = byId("session-name");
+      const name = nameInput ? nameInput.value.trim() : "";
+      if (!name) return;
+      const tags = (byId("session-tags")?.value || "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      send({ type: "sessions.save", name, tags });
+      if (nameInput) nameInput.value = "";
+      const tagInput = byId("session-tags");
+      if (tagInput) tagInput.value = "";
+    });
+  }
+  const sessionFilter = byId("session-filter");
+  if (sessionFilter) {
+    sessionFilter.addEventListener("input", () => renderSessions());
+  }
 
   const renderDownloads = (items = current.downloads || []) => {
     const list = byId("downloads-list");
