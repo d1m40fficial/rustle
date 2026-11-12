@@ -92,7 +92,7 @@
         <div class="newtab__brand">Rustle</div>
         <canvas class="newtab__particles" id="newtab-particles"></canvas>
       </div>
-      <p class="newtab__tagline">Минималистичный браузер. 0.14.0.</p>
+      <p class="newtab__tagline">Минималистичный браузер. 0.15.0.</p>
 
       <form class="newtab__search" id="newtab-search" role="search">
         <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
@@ -105,7 +105,7 @@
         <button class="newtab__add newtab__edit" id="newtab-edit" type="button">✎ Редактировать плитки</button>
       </div>
 
-      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.14.0</span></p>
+      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.15.0</span></p>
     </div>
   </section>
 
@@ -349,6 +349,13 @@
       <div class="switcher__list" id="switcher-list"></div>
     </div>
   </div>
+  <div class="palette-overlay" id="palette-overlay" hidden>
+    <div class="palette" role="dialog" aria-modal="true">
+      <input class="palette__input" id="palette-input" type="text" placeholder="Команда или вкладка…" autocomplete="off">
+      <div class="palette__list" id="palette-list"></div>
+    </div>
+  </div>
+
   <div class="resize-overlay" aria-hidden="true">
     <div class="resize-edge" data-edge="12" style="top:0;left:0;right:0;height:10px;cursor:ns-resize"></div>
     <div class="resize-edge" data-edge="10" style="top:0;left:0;bottom:0;width:10px;cursor:ew-resize"></div>

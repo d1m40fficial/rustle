@@ -6012,7 +6012,7 @@ unsafe extern "system" fn resize_subclass(
             if wparam != 0 {
                 let params = &mut *(lparam as *mut NcCalcSizeParams);
                 params.rgrc[0].left += border;
-                params.rgrc[0].top += border;
+                params.rgrc[0].top += 6;
                 params.rgrc[0].right -= border;
                 params.rgrc[0].bottom -= border;
             } else {

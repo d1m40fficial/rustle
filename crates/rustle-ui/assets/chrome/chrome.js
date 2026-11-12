@@ -2385,7 +2385,103 @@
       });
     }
 
-    initParticleHero();
+    let paletteIndex = 0;
+  let paletteResults = [];
+  const paletteActions = () => [
+    { label: "Новая вкладка", hint: "Ctrl+T", run: () => send({ type: "tabs.new" }) },
+    { label: "Настройки", hint: "rustle://settings", run: () => send({ type: "nav.go", url: "rustle://settings" }) },
+    { label: "История", hint: "rustle://history", run: () => send({ type: "nav.go", url: "rustle://history" }) },
+    { label: "Закладки", hint: "rustle://bookmarks", run: () => send({ type: "nav.go", url: "rustle://bookmarks" }) },
+    { label: "Загрузки", hint: "rustle://downloads", run: () => send({ type: "nav.go", url: "rustle://downloads" }) },
+    { label: "Библиотека сессий", hint: "rustle://settings", run: () => send({ type: "nav.go", url: "rustle://settings" }) },
+    { label: "Закрыть вкладку", hint: "Ctrl+W", run: () => send({ type: "tabs.close", id: current.activeId }) },
+  ];
+  const paletteItems = (query) => {
+    const needle = query.trim().toLowerCase();
+    const actions = paletteActions().map((item) => ({ ...item, kind: "Действие" }));
+    const tabs = (current.tabs || []).map((tab) => ({
+      label: tab.title || tab.url || "Вкладка",
+      hint: tab.url || "",
+      kind: "Вкладка",
+      run: () => send({ type: "tabs.activate", id: tab.id }),
+    }));
+    return [...actions, ...tabs]
+      .filter((item) => !needle || (item.label + " " + item.hint).toLowerCase().includes(needle))
+      .slice(0, 12);
+  };
+  const renderPalette = () => {
+    const list = byId("palette-list");
+    const input = byId("palette-input");
+    if (!list || !input) return;
+    paletteResults = paletteItems(input.value);
+    paletteIndex = Math.min(paletteIndex, Math.max(0, paletteResults.length - 1));
+    list.replaceChildren();
+    paletteResults.forEach((item, index) => {
+      const row = document.createElement("div");
+      row.className = "palette__item" + (index === paletteIndex ? " is-active" : "");
+      const label = document.createElement("span");
+      label.textContent = item.label;
+      const hint = document.createElement("small");
+      hint.textContent = item.hint || item.kind;
+      row.append(label, hint);
+      row.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        closePalette();
+        item.run();
+      });
+      list.append(row);
+    });
+  };
+  const openPalette = () => {
+    const overlay = byId("palette-overlay");
+    const input = byId("palette-input");
+    if (!overlay || !input) return;
+    overlay.hidden = false;
+    input.value = "";
+    paletteIndex = 0;
+    renderPalette();
+    input.focus();
+  };
+  const closePalette = () => {
+    const overlay = byId("palette-overlay");
+    if (overlay) overlay.hidden = true;
+  };
+  document.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      openPalette();
+      return;
+    }
+    const overlay = byId("palette-overlay");
+    if (!overlay || overlay.hidden) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closePalette();
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      paletteIndex = Math.min(paletteResults.length - 1, paletteIndex + 1);
+      renderPalette();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      paletteIndex = Math.max(0, paletteIndex - 1);
+      renderPalette();
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const item = paletteResults[paletteIndex];
+      if (item) {
+        closePalette();
+        item.run();
+      }
+    }
+  });
+  const paletteInput = byId("palette-input");
+  if (paletteInput) paletteInput.addEventListener("input", renderPalette);
+  const paletteOverlay = byId("palette-overlay");
+  if (paletteOverlay) paletteOverlay.addEventListener("pointerdown", (event) => {
+    if (event.target === paletteOverlay) closePalette();
+  });
+
+  initParticleHero();
 
     document.querySelectorAll(".resize-edge").forEach((node) => {
       const edge = Number(node.dataset.edge);
