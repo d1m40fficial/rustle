@@ -1083,6 +1083,7 @@ mod native_menu {
         push(items, "app.reopen", "Вернуть закрытую вкладку");
         separator(items);
         push(items, "app.sessions", "Библиотека сессий");
+        push(items, "app.unloadInactive", "Выгрузить неактивные вкладки");
         push(items, "app.session.save", "Сохранить сессию…");
         push(items, "app.session.open", "Открыть сессию…");
         push(items, "app.autogroup", "Сгруппировать по доменам");
@@ -2627,6 +2628,21 @@ fn refresh_saved_sessions(state: &Rc<RefCell<AppState>>) {
     items.reverse();
     state.borrow_mut().saved_sessions = items;
     push_ui_state(state);
+}
+
+fn unload_inactive_tabs(state: &Rc<RefCell<AppState>>) {
+    let active = state.borrow().active;
+    {
+        let mut state_ref = state.borrow_mut();
+        for tab in &mut state_ref.tabs {
+            if tab.id != active && !tab.pinned {
+                let _ = tab.webview.take();
+                tab.loading = false;
+            }
+        }
+    }
+    push_ui_state(state);
+    save_session_due(state);
 }
 
 fn save_named_session(state: &Rc<RefCell<AppState>>, name: &str) {
@@ -4816,6 +4832,7 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
         Some("nav.reload") => reload_active(state),
         Some("nav.stop") => stop_active(state),
         Some("nav.retry") => reload_active(state),
+        Some("tabs.unloadInactive") => unload_inactive_tabs(state),
         Some("tabs.new") => {
             let _ = state.borrow().proxy.send_event(AppEvent::NewTab);
         }
@@ -6014,7 +6031,7 @@ unsafe extern "system" fn resize_subclass(
             if wparam != 0 {
                 let params = &mut *(lparam as *mut NcCalcSizeParams);
                 params.rgrc[0].left += border;
-                params.rgrc[0].top += 6;
+                // top edge stays in the client area: no extra line above the toolbar
                 params.rgrc[0].right -= border;
                 params.rgrc[0].bottom -= border;
             } else {

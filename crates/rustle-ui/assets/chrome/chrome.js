@@ -2395,6 +2395,7 @@
     { label: "Загрузки", hint: "rustle://downloads", run: () => send({ type: "nav.go", url: "rustle://downloads" }) },
     { label: "Библиотека сессий", hint: "rustle://settings", run: () => send({ type: "nav.go", url: "rustle://settings" }) },
     { label: "Закрыть вкладку", hint: "Ctrl+W", run: () => send({ type: "tabs.close", id: current.activeId }) },
+    { label: "Выгрузить неактивные вкладки", hint: "память", run: () => send({ type: "tabs.unloadInactive" }) },
   ];
   const paletteItems = (query) => {
     const needle = query.trim().toLowerCase();
