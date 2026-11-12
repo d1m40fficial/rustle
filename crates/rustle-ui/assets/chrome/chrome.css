@@ -1167,7 +1167,7 @@ html.private-mode .build-badge {
 }
 
 .window-control--close {
-  background: transparent;
+  background: #ff5f57;
 }
 
 .window-control--max {

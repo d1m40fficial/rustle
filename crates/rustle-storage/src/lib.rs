@@ -85,6 +85,14 @@ pub struct Settings {
     pub containers: Vec<String>,
     #[serde(default)]
     pub default_container: Option<String>,
+    #[serde(default)]
+    pub window_width: Option<u32>,
+    #[serde(default)]
+    pub window_height: Option<u32>,
+    #[serde(default)]
+    pub window_x: Option<i32>,
+    #[serde(default)]
+    pub window_y: Option<i32>,
 }
 
 fn default_search_engine() -> String {
@@ -147,6 +155,10 @@ impl Default for Settings {
             adblock_custom_rules: Vec::new(),
             containers: default_containers(),
             default_container: None,
+            window_width: None,
+            window_height: None,
+            window_x: None,
+            window_y: None,
         }
     }
 }

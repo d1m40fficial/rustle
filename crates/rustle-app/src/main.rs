@@ -291,6 +291,7 @@ struct AppState {
     webview2_version: String,
     update_status: String,
     resize_session: Option<ResizeSession>,
+    settings_dirty: bool,
 }
 
 struct LayoutAnimation {
@@ -349,6 +350,7 @@ impl AppState {
             webview2_version: String::new(),
             update_status: String::new(),
             resize_session: None,
+            settings_dirty: false,
         }
     }
 
@@ -6143,6 +6145,8 @@ fn enable_frameless_resize(window: &Window) {
     const WS_THICKFRAME: isize = 0x0004_0000;
     const WS_MINIMIZEBOX: isize = 0x0002_0000;
     const WS_MAXIMIZEBOX: isize = 0x0001_0000;
+    const WS_CAPTION: isize = 0x00C0_0000;
+    const WS_SYSMENU: isize = 0x0008_0000;
     const SWP_NOSIZE: u32 = 0x0001;
     const SWP_NOMOVE: u32 = 0x0002;
     const SWP_NOZORDER: u32 = 0x0004;
@@ -6154,7 +6158,7 @@ fn enable_frameless_resize(window: &Window) {
         SetWindowLongPtrW(
             hwnd,
             GWL_STYLE,
-            style | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+            (style & !(WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)) | WS_THICKFRAME,
         );
         SetWindowPos(
             hwnd,
@@ -6340,6 +6344,16 @@ fn main() -> wry::Result<()> {
 
     let size = window.inner_size().to_logical::<u32>(window.scale_factor());
     let settings = rustle_storage::load_settings();
+    if !private {
+        if let (Some(width), Some(height)) = (settings.window_width, settings.window_height) {
+            if width >= 720 && height >= 480 {
+                window.set_inner_size(TaoLogicalSize::new(width as f64, height as f64));
+            }
+        }
+        if let (Some(x), Some(y)) = (settings.window_x, settings.window_y) {
+            window.set_outer_position(tao::dpi::LogicalPosition::new(x, y));
+        }
+    }
     let private_root = private.then(|| {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -6469,6 +6483,14 @@ fn main() -> wry::Result<()> {
                     }
                     *control_flow = ControlFlow::Exit;
                 }
+                WindowEvent::Moved(position) => {
+                    if !private {
+                        let mut state = state.borrow_mut();
+                        state.settings.window_x = Some(position.x);
+                        state.settings.window_y = Some(position.y);
+                        state.settings_dirty = true;
+                    }
+                }
                 WindowEvent::Resized(size) => {
                     let logical = size.to_logical::<u32>(window.scale_factor());
                     if logical.width > 0 && logical.height > 0 {
@@ -6476,6 +6498,11 @@ fn main() -> wry::Result<()> {
                             let mut state = state.borrow_mut();
                             state.width = logical.width;
                             state.height = logical.height;
+                            if !state.private {
+                                state.settings.window_width = Some(logical.width);
+                                state.settings.window_height = Some(logical.height);
+                                state.settings_dirty = true;
+                            }
                         }
                         apply_layout(&state);
                     }
@@ -6686,6 +6713,11 @@ fn main() -> wry::Result<()> {
             Event::UserEvent(AppEvent::Autosave) => {
                 if state.borrow().ready {
                     save_session_state(&state, false);
+                    if state.borrow().settings_dirty && !state.borrow().private {
+                        let settings = state.borrow().settings.clone();
+                        let _ = rustle_storage::save_settings(&settings);
+                        state.borrow_mut().settings_dirty = false;
+                    }
                 }
             }
             Event::UserEvent(AppEvent::UpdateStatus(status)) => {
