@@ -1143,17 +1143,18 @@ mod native_menu {
                                 "Закрепить вкладку",
                             );
                         }
-                        for (container, label) in [
-                            (None, "Без контейнера"),
-                            (Some("personal"), "Личный"),
-                            (Some("work"), "Рабочий"),
-                            (Some("bank"), "Банк"),
-                        ] {
+                        push_checked(
+                            &mut entries,
+                            &format!("tab.container:{}:none", id.0),
+                            "Без контейнера",
+                            tab.container.is_none(),
+                        );
+                        for container in &state.settings.containers {
                             push_checked(
                                 &mut entries,
-                                &format!("tab.container:{}:{}", id.0, container.unwrap_or("none")),
-                                label,
-                                tab.container.as_deref() == container,
+                                &format!("tab.container:{}:{}", id.0, container),
+                                container,
+                                tab.container.as_deref() == Some(container.as_str()),
                             );
                         }
                         separator(&mut entries);
