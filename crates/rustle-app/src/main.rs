@@ -6553,8 +6553,24 @@ fn main() -> wry::Result<()> {
         }
         if let (Some(x), Some(y)) = (settings.window_x, settings.window_y) {
             window.set_outer_position(tao::dpi::LogicalPosition::new(x, y));
+            if let Some(monitor) = window.current_monitor() {
+                let origin = monitor.position();
+                let area = monitor.size();
+                let outer = window.outer_size();
+                let max_x = (origin.x + area.width as i32 - outer.width as i32).max(origin.x);
+                let max_y = (origin.y + area.height as i32 - outer.height as i32).max(origin.y);
+                let clamped_x = x.clamp(origin.x, max_x);
+                let clamped_y = y.clamp(origin.y, max_y);
+                if clamped_x != x || clamped_y != y {
+                    window.set_outer_position(tao::dpi::LogicalPosition::new(clamped_x, clamped_y));
+                }
+            }
         }
     }
+    window.set_minimized(false);
+    window.set_visible(true);
+    window.set_focus();
+    mark("visible-early");
     let private_root = private.then(|| {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

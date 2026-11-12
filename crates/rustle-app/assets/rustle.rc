@@ -17,12 +17,12 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "Rustle"
       VALUE "FileDescription", "Rustle Browser"
-      VALUE "FileVersion", "0.25.0.0"
+      VALUE "FileVersion", "0.26.0.0"
       VALUE "InternalName", "rustle"
       VALUE "LegalCopyright", "MIT License"
       VALUE "OriginalFilename", "rustle.exe"
       VALUE "ProductName", "Rustle"
-      VALUE "ProductVersion", "0.25.0.0"
+      VALUE "ProductVersion", "0.26.0.0"
     END
   END
   BLOCK "VarFileInfo"

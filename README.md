@@ -69,7 +69,7 @@
 
 ```powershell
 cargo build --release
-./scripts/build-release.ps1 -Version 0.25.0
+./scripts/build-release.ps1 -Version 0.26.0
 ```
 
 Нужны Rust stable, MinGW/MSVC и Inno Setup. Portable-сборка кладёт `WebView2Loader.dll` рядом с `rustle.exe`.
