@@ -765,6 +765,11 @@
     items.forEach((item) => {
       const card = document.createElement("div");
       card.className = "session-card";
+      const cover = document.createElement("div");
+      cover.className = "session-card__cover";
+      let hue = 0;
+      for (const char of item.name || "session") hue = (hue * 31 + char.charCodeAt(0)) % 360;
+      cover.style.background = "linear-gradient(135deg, hsl(" + hue + " 42% 28%), hsl(" + ((hue + 48) % 360) + " 42% 16%))";
       const title = document.createElement("strong");
       title.textContent = item.name || "Сессия";
       const meta = document.createElement("small");
@@ -788,7 +793,7 @@
       remove.textContent = "Удалить";
       remove.addEventListener("click", () => send({ type: "sessions.delete", id: item.id }));
       actions.append(open, rename, remove);
-      card.append(title, meta, actions);
+      card.append(cover, title, meta, actions);
       list.append(card);
     });
   };
@@ -969,6 +974,26 @@
     if (adblock) {
       adblock.checked = settings.adblock !== false;
     }
+    const containers = byId("setting-containers");
+    if (containers) {
+      containers.value = (settings.containers || []).join("\n");
+    }
+    const defaultContainer = byId("setting-default-container");
+    if (defaultContainer) {
+      const selected = settings.defaultContainer || "";
+      defaultContainer.replaceChildren();
+      const none = document.createElement("option");
+      none.value = "";
+      none.textContent = "Без контейнера";
+      defaultContainer.append(none);
+      (settings.containers || []).forEach((name) => {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        if (name === selected) option.selected = true;
+        defaultContainer.append(option);
+      });
+    }
     const exceptions = byId("setting-adblock-exceptions");
     if (exceptions) {
       exceptions.value = (settings.adblockExceptions || []).join("\n");
@@ -1096,6 +1121,21 @@
   };
 
   const EN_TEXT = {
+    "Повторить": "Retry",
+    "Папка": "Folder",
+    "Имя": "Rename",
+    "Удалить": "Delete",
+    "Готово": "Done",
+    "Прервано": "Interrupted",
+    "Отменено": "Cancelled",
+    "Пока ничего не заблокировано.": "Nothing blocked yet.",
+    "Последние заблокированные запросы.": "Latest blocked requests.",
+    "Журнал блокировок": "Blocked log",
+    "Название сессии": "Session name",
+    "Теги через запятую": "Tags, comma separated",
+    "Поиск по сессиям и тегам": "Search sessions and tags",
+    "Сохранённых сессий пока нет.": "No saved sessions yet.",
+
     "Библиотека сессий": "Session library",
     "Минималистичный браузер. 0.5.0.": "Minimal browser. 0.5.0.",
     "+ Добавить сайт": "+ Add site",
@@ -2142,6 +2182,11 @@
               .split(/\r?\n/)
               .map((entry) => entry.trim())
               .filter(Boolean),
+            containers: (byId("setting-containers")?.value || "")
+              .split(/[\n,]+/)
+              .map((entry) => entry.trim().toLowerCase())
+              .filter(Boolean),
+            defaultContainer: byId("setting-default-container")?.value || null,
             adblockExceptions: (byId("setting-adblock-exceptions")?.value || "")
               .split(/[,\n]+/)
               .map((entry) => entry.trim())

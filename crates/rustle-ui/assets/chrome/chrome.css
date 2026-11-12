@@ -1885,3 +1885,5 @@ html.vertical-mode .switcher-overlay {
 
 .blocked-list { display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto; width: 100%; }
 .blocked-row { padding: 5px 7px; border: 1px solid var(--border); border-radius: 6px; color: var(--faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.session-card__cover { grid-column: 1 / -1; height: 42px; border-radius: 6px; }

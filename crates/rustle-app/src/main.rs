@@ -4451,7 +4451,15 @@ fn apply_cosmetic_filters(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
         let Some(engine) = &state.adblock_engine else {
             return;
         };
-        adblock::cosmetic(engine, &tab.url)
+        let mut cosmetic = adblock::cosmetic(engine, &tab.url);
+        if let Some(custom) = &state.adblock_custom_engine {
+            let extra = adblock::cosmetic(custom, &tab.url);
+            cosmetic.hide_selectors.extend(extra.hide_selectors);
+            cosmetic.injected_script.push_str(&extra.injected_script);
+            cosmetic.exceptions.extend(extra.exceptions);
+            cosmetic.generichide = cosmetic.generichide && extra.generichide;
+        }
+        cosmetic
     };
     {
         let mut state = state.borrow_mut();
