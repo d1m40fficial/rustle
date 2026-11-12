@@ -5933,6 +5933,14 @@ fn install_resize_mouse_hook(hwnd: isize) {
 
 #[cfg(target_os = "windows")]
 #[repr(C)]
+struct NcCalcSizeParams {
+    rgrc: [ResizeRect; 3],
+    dst: isize,
+    src: isize,
+}
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
 struct ResizePoint {
     x: i32,
     y: i32,
@@ -5996,6 +6004,27 @@ unsafe extern "system" fn resize_subclass(
     const HTBOTTOMLEFT: isize = 16;
     const HTBOTTOMRIGHT: isize = 17;
     const BORDER: i32 = 10;
+    const WM_NCCALCSIZE: u32 = 0x0083;
+
+    if msg == WM_NCCALCSIZE {
+        let border = 8i32;
+        unsafe {
+            if wparam != 0 {
+                let params = &mut *(lparam as *mut NcCalcSizeParams);
+                params.rgrc[0].left += border;
+                params.rgrc[0].top += border;
+                params.rgrc[0].right -= border;
+                params.rgrc[0].bottom -= border;
+            } else {
+                let rect = &mut *(lparam as *mut ResizeRect);
+                rect.left += border;
+                rect.top += border;
+                rect.right -= border;
+                rect.bottom -= border;
+            }
+        }
+        return 0;
+    }
 
     if msg == 0x0005 {
         layout_resize_overlays(hwnd);
@@ -6137,6 +6166,15 @@ fn enable_frameless_resize(window: &Window) {
             SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED,
         );
         SetWindowSubclass(hwnd, Some(resize_subclass), 1, 0);
+        SetWindowPos(
+            hwnd,
+            0,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED,
+        );
     }
 }
 
