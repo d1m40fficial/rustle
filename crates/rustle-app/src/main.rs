@@ -6607,8 +6607,12 @@ fn main() -> wry::Result<()> {
                 }
             }
             Event::UserEvent(AppEvent::Focus) => {
-                state.borrow().window.set_visible(true);
-                state.borrow().window.set_focus();
+                {
+                    let window = state.borrow().window.clone();
+                    window.set_minimized(false);
+                    window.set_visible(true);
+                    window.set_focus();
+                }
                 focus_active_content(&state);
             }
             Event::UserEvent(AppEvent::NewTab) => {

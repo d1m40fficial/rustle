@@ -892,6 +892,10 @@
     if (theme) {
       theme.value = settings.theme || "system";
     }
+    const language = byId("setting-language");
+    if (language) {
+      language.value = settings.language || "ru";
+    }
     if (startup) {
       startup.value = settings.startup || "restore";
     }
@@ -2069,6 +2073,7 @@
           type: "settings.save",
           searchEngine: byId("setting-engine").value,
           theme: byId("setting-theme").value,
+          language: byId("setting-language")?.value || "ru",
           startup: byId("setting-startup").value,
           httpsFirst: byId("setting-https").checked,
           clearOnExit: byId("setting-clear-exit").checked,

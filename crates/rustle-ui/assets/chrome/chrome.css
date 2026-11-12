@@ -1855,3 +1855,18 @@ html.vertical-mode .switcher-overlay {
 }
 .resize-overlay { position: fixed; inset: 0; z-index: 2147483600; pointer-events: none; }
 .resize-edge { position: absolute; pointer-events: auto; touch-action: none; }
+
+
+.newtab__search:focus-within {
+  outline: none;
+  box-shadow: none;
+}
+
+.newtab__input,
+.newtab__input:focus,
+.newtab__input:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent;
+  -webkit-tap-highlight-color: transparent;
+}
