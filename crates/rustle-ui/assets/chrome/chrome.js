@@ -2500,6 +2500,7 @@
     { label: "Закрыть вкладку", hint: "Ctrl+W", run: () => send({ type: "tabs.close", id: current.activeId }) },
     { label: "Выгрузить неактивные вкладки", hint: "память", run: () => send({ type: "tabs.unloadInactive" }) },
     { label: "Режим чтения", hint: "очистить страницу", run: () => send({ type: "page.reader" }) },
+    { label: "Картинка в картинке", hint: "видео", run: () => send({ type: "page.pip" }) },
   ];
   const paletteItems = (query) => {
     const needle = query.trim().toLowerCase();

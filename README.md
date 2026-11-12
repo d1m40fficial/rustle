@@ -28,7 +28,7 @@
 
 ```powershell
 cargo build --release
-./scripts/build-release.ps1 -Version 0.23.0
+./scripts/build-release.ps1 -Version 0.24.0
 ```
 
 Нужны Rust stable, MinGW/MSVC и Inno Setup для установщика.

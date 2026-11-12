@@ -116,6 +116,7 @@ pub enum AdblockEvent {
     },
 }
 
+#[derive(Debug, PartialEq)]
 pub enum Match {
     Allow,
     Block,
@@ -366,6 +367,31 @@ pub fn generic_selectors(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_regex_and_cosmetic_rules_build() {
+        let rules = vec![
+            "/ads[0-9]+\\.js/".to_owned(),
+            "example.com##.sponsored".to_owned(),
+        ];
+        let engine = build_custom(&rules).expect("custom engine");
+        assert_eq!(
+            check(
+                &engine,
+                "https://site.test/ads42.js",
+                "https://site.test/",
+                "script"
+            ),
+            Match::Block
+        );
+        let cosmetic = cosmetic(&engine, "https://example.com/page");
+        assert!(
+            cosmetic
+                .hide_selectors
+                .iter()
+                .any(|selector| selector.contains("sponsored"))
+        );
+    }
 
     #[test]
     fn fallback_list_blocks_ads() {

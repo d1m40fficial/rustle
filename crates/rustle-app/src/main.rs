@@ -82,6 +82,17 @@ const SIDEBAR_COLLAPSED: u32 = 56;
 const CHROME_URL: &str = "rustle://localhost/chrome/index.html";
 const NEWTAB_URL: &str = "rustle://localhost/newtab/index.html";
 
+const PIP_JS: &str = r#"(async function(){
+  if (document.pictureInPictureElement) {
+    try { await document.exitPictureInPicture(); } catch (error) {}
+    return;
+  }
+  var video = document.querySelector("video");
+  if (video && video.requestPictureInPicture) {
+    try { await video.requestPictureInPicture(); } catch (error) {}
+  }
+})();"#;
+
 const READER_JS: &str = r#"(function(){
   var id = "rustle-reader-style";
   var style = document.getElementById(id);
@@ -1086,6 +1097,8 @@ mod native_menu {
             "Переименовать группу…" => "Rename group…",
             "Удалить группу" => "Delete group",
             "Без контейнера" => "No container",
+            "Режим чтения" => "Reader mode",
+            "Картинка в картинке" => "Picture in picture",
             _ => "",
         };
         if !exact.is_empty() {
@@ -1103,6 +1116,7 @@ mod native_menu {
         separator(items);
         push(items, "app.sessions", "Библиотека сессий");
         push(items, "app.reader", "Режим чтения");
+        push(items, "app.pip", "Картинка в картинке");
         push(items, "app.unloadInactive", "Выгрузить неактивные вкладки");
         push(items, "app.session.save", "Сохранить сессию…");
         push(items, "app.session.open", "Открыть сессию…");
@@ -5341,6 +5355,15 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
         Some("adblock.whitelist") => whitelist_current(state),
         Some("page.pdf") => print_active_pdf(state),
         Some("page.screenshot") => screenshot_window(state),
+        Some("page.pip") => {
+            if let Some(webview) = state
+                .borrow()
+                .active_tab()
+                .and_then(|tab| tab.webview.as_ref())
+            {
+                let _ = webview.evaluate_script(PIP_JS);
+            }
+        }
         Some("page.reader") => {
             if let Some(webview) = state
                 .borrow()
