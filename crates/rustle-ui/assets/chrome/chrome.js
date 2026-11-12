@@ -777,12 +777,17 @@
       open.type = "button";
       open.textContent = "Открыть";
       open.addEventListener("click", () => send({ type: "sessions.load", id: item.id }));
+      const rename = document.createElement("button");
+      rename.className = "button";
+      rename.type = "button";
+      rename.textContent = "Имя";
+      rename.addEventListener("click", () => openPrompt("sessionrename", { id: item.id }, "Название сессии", item.name || ""));
       const remove = document.createElement("button");
       remove.className = "button";
       remove.type = "button";
       remove.textContent = "Удалить";
       remove.addEventListener("click", () => send({ type: "sessions.delete", id: item.id }));
-      actions.append(open, remove);
+      actions.append(open, rename, remove);
       card.append(title, meta, actions);
       list.append(card);
     });
@@ -808,6 +813,25 @@
   if (sessionFilter) {
     sessionFilter.addEventListener("input", () => renderSessions());
   }
+
+  const renderBlockedLog = (items = current.blockedLog || []) => {
+    const list = byId("blocked-list");
+    if (!list) return;
+    list.replaceChildren();
+    if (!items.length) {
+      const empty = document.createElement("span");
+      empty.className = "page-hint";
+      empty.textContent = "Пока ничего не заблокировано.";
+      list.append(empty);
+      return;
+    }
+    items.slice().reverse().slice(0, 30).forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "blocked-row";
+      row.textContent = item.url || "";
+      list.append(row);
+    });
+  };
 
   const renderDownloads = (items = current.downloads || []) => {
     const list = byId("downloads-list");
@@ -1359,6 +1383,9 @@
     document.documentElement.style.setProperty("--chrome-offset", payload.vertical ? "44px" : "78px");
     document.documentElement.style.setProperty("--toolbar-nav-left", Math.max(72, sideWidth) + "px");
     window.requestAnimationFrame(syncAddressOverlay);
+    if (Array.isArray(payload.blockedLog)) {
+      renderBlockedLog(payload.blockedLog);
+    }
     if (Array.isArray(payload.sessions)) {
       renderSessions(payload.sessions);
     }
@@ -2421,6 +2448,7 @@
     { label: "Библиотека сессий", hint: "rustle://settings", run: () => send({ type: "nav.go", url: "rustle://settings" }) },
     { label: "Закрыть вкладку", hint: "Ctrl+W", run: () => send({ type: "tabs.close", id: current.activeId }) },
     { label: "Выгрузить неактивные вкладки", hint: "память", run: () => send({ type: "tabs.unloadInactive" }) },
+    { label: "Режим чтения", hint: "очистить страницу", run: () => send({ type: "page.reader" }) },
   ];
   const paletteItems = (query) => {
     const needle = query.trim().toLowerCase();

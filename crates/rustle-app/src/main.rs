@@ -82,6 +82,18 @@ const SIDEBAR_COLLAPSED: u32 = 56;
 const CHROME_URL: &str = "rustle://localhost/chrome/index.html";
 const NEWTAB_URL: &str = "rustle://localhost/newtab/index.html";
 
+const READER_JS: &str = r#"(function(){
+  var id = "rustle-reader-style";
+  var style = document.getElementById(id);
+  if (!style) {
+    style = document.createElement("style");
+    style.id = id;
+    style.textContent = "body.rustle-reader{max-width:820px!important;margin:0 auto!important;padding:32px 18px!important;font-size:18px!important;line-height:1.7!important;background:#1b1b1b!important;color:#e8e8e8!important}body.rustle-reader nav,body.rustle-reader aside,body.rustle-reader header,body.rustle-reader footer,body.rustle-reader [role=navigation]{display:none!important}body.rustle-reader img{max-width:100%!important;height:auto!important}";
+    document.head.appendChild(style);
+  }
+  document.body.classList.toggle("rustle-reader");
+})();"#;
+
 const RESIZE_JS: &str = r#"(function(){
   if (window.__rustleResizeInstalled) return;
   window.__rustleResizeInstalled = true;
@@ -295,6 +307,7 @@ struct AppState {
     update_status: String,
     resize_session: Option<ResizeSession>,
     settings_dirty: bool,
+    blocked_log: Vec<Value>,
 }
 
 struct LayoutAnimation {
@@ -354,6 +367,7 @@ impl AppState {
             update_status: String::new(),
             resize_session: None,
             settings_dirty: false,
+            blocked_log: Vec::new(),
         }
     }
 
@@ -785,6 +799,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                 "autoSuspendMinutes": state.settings.auto_suspend_minutes,
             },
             "adblockStatus": state.adblock_info.to_json(),
+            "blockedLog": state.blocked_log,
             "adblockExceptions": state.settings.adblock_exceptions,
             "downloads": downloads_payload(&state),
         });
@@ -1087,6 +1102,7 @@ mod native_menu {
         push(items, "app.reopen", "Вернуть закрытую вкладку");
         separator(items);
         push(items, "app.sessions", "Библиотека сессий");
+        push(items, "app.reader", "Режим чтения");
         push(items, "app.unloadInactive", "Выгрузить неактивные вкладки");
         push(items, "app.session.save", "Сохранить сессию…");
         push(items, "app.session.open", "Открыть сессию…");
@@ -2753,6 +2769,31 @@ fn load_named_session(state: &Rc<RefCell<AppState>>, id: &str) {
     ensure_tab_webview(state, active);
     apply_layout(state);
     push_ui_state(state);
+}
+
+fn rename_named_session(state: &Rc<RefCell<AppState>>, id: &str, name: &str) {
+    if !id
+        .chars()
+        .all(|ch| ch.is_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return;
+    }
+    let path = sessions_dir().join(format!("{id}.json"));
+    let Ok(text) = fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(mut saved) = serde_json::from_str::<SavedSessionFile>(&text) else {
+        return;
+    };
+    let name = name.trim();
+    if name.is_empty() {
+        return;
+    }
+    saved.name = name.to_owned();
+    if let Ok(bytes) = serde_json::to_vec_pretty(&saved) {
+        let _ = fs::write(path, bytes);
+    }
+    refresh_saved_sessions(state);
 }
 
 fn delete_named_session(state: &Rc<RefCell<AppState>>, id: &str) {
@@ -4787,8 +4828,18 @@ fn install_adblock_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, tab
         match outcome {
             adblock::Match::Allow => {}
             adblock::Match::Block => {
-                if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
-                    tab.blocked += 1;
+                {
+                    let mut state_ref = state.borrow_mut();
+                    if let Some(tab) = state_ref.tab_mut(tab_id) {
+                        tab.blocked += 1;
+                    }
+                    state_ref.blocked_log.push(json!({
+                        "url": url.clone(),
+                        "tab": tab_id.0,
+                    }));
+                    if state_ref.blocked_log.len() > 80 {
+                        state_ref.blocked_log.remove(0);
+                    }
                 }
                 if let Ok(response) = unsafe {
                     environment.CreateWebResourceResponse(
@@ -5265,6 +5316,14 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 load_named_session(state, id);
             }
         }
+        Some("sessions.rename") => {
+            if let (Some(id), Some(name)) = (
+                message.get("id").and_then(|value| value.as_str()),
+                message.get("name").and_then(|value| value.as_str()),
+            ) {
+                rename_named_session(state, id, name);
+            }
+        }
         Some("sessions.delete") => {
             if let Some(id) = message.get("id").and_then(|value| value.as_str()) {
                 delete_named_session(state, id);
@@ -5274,6 +5333,15 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
         Some("adblock.whitelist") => whitelist_current(state),
         Some("page.pdf") => print_active_pdf(state),
         Some("page.screenshot") => screenshot_window(state),
+        Some("page.reader") => {
+            if let Some(webview) = state
+                .borrow()
+                .active_tab()
+                .and_then(|tab| tab.webview.as_ref())
+            {
+                let _ = webview.evaluate_script(READER_JS);
+            }
+        }
         Some("session.openAs") => open_session_as(state),
         Some("settings.import") => import_config(state),
         Some("window.resizeStart") => resize_window_ipc(state, &message, true, false),
