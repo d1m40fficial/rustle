@@ -643,7 +643,28 @@ pub fn save_session_to(path: &Path, session: &Session) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::Storage;
+    use super::{Settings, Storage};
+
+
+    #[test]
+    fn settings_roundtrip_keeps_geometry_and_suspend() {
+        let mut settings = Settings::default();
+        settings.window_width = Some(1440);
+        settings.window_height = Some(900);
+        settings.window_x = Some(40);
+        settings.window_y = Some(60);
+        settings.auto_suspend_minutes = 15;
+        settings.language = "en".to_owned();
+
+        let encoded = serde_json::to_string(&settings).expect("serialize settings");
+        let decoded: Settings = serde_json::from_str(&encoded).expect("deserialize settings");
+        assert_eq!(decoded.window_width, Some(1440));
+        assert_eq!(decoded.window_height, Some(900));
+        assert_eq!(decoded.window_x, Some(40));
+        assert_eq!(decoded.window_y, Some(60));
+        assert_eq!(decoded.auto_suspend_minutes, 15);
+        assert_eq!(decoded.language, "en");
+    }
 
     #[test]
     fn records_and_deduplicates_history() {
