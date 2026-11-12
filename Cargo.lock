@@ -2413,7 +2413,7 @@ dependencies = [
 
 [[package]]
 name = "rustle-app"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "adblock",
  "embed-resource",
@@ -2435,7 +2435,7 @@ dependencies = [
 
 [[package]]
 name = "rustle-core"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "serde",
  "url",
@@ -2443,15 +2443,15 @@ dependencies = [
 
 [[package]]
 name = "rustle-engine"
-version = "0.22.0"
+version = "0.23.0"
 
 [[package]]
 name = "rustle-platform"
-version = "0.22.0"
+version = "0.23.0"
 
 [[package]]
 name = "rustle-storage"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "rusqlite",
  "serde",
@@ -2460,7 +2460,7 @@ dependencies = [
 
 [[package]]
 name = "rustle-ui"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "include_dir",
 ]

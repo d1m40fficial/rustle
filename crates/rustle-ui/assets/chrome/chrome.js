@@ -1121,6 +1121,12 @@
   };
 
   const EN_TEXT = {
+    "Автосон вкладок": "Tab auto-suspend",
+    "Выгружать неактивные вкладки для экономии памяти.": "Unload inactive tabs to save memory.",
+    "Режим чтения": "Reader mode",
+    "Сохранение текущей": "Save current",
+    "Теги": "Tags",
+
     "Повторить": "Retry",
     "Папка": "Folder",
     "Имя": "Rename",
