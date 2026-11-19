@@ -107,6 +107,24 @@ const LOADING_OVERLAY_JS: &str = r#"(function(){
 const LOADING_HIDE_JS: &str =
     r#"(function(){var e=document.getElementById("rustle-loading-overlay");if(e)e.remove();})();"#;
 
+const RUTUBE_SKIP_JS: &str = r#"(function(){
+  if (window.__rustleRutubeSkip) return;
+  window.__rustleRutubeSkip = true;
+  var timer = 0;
+  function skip() {
+    var nodes = document.querySelectorAll("button,[role='button'],span,div");
+    for (var i = 0; i < nodes.length; i++) {
+      var text = (nodes[i].textContent || "").trim().toLowerCase();
+      if (text.indexOf("пропустить") !== -1 || text === "skip" || text.indexOf("skip ad") !== -1) {
+        try { nodes[i].click(); } catch (error) {}
+      }
+    }
+  }
+  function start() { window.clearInterval(timer); timer = window.setInterval(skip, 700); }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
+  else start();
+})();"#;
+
 const PIP_JS: &str = r#"(async function(){
   if (document.pictureInPictureElement) {
     try { await document.exitPictureInPicture(); } catch (error) {}
@@ -1723,6 +1741,19 @@ fn on_page_load(state: &Rc<RefCell<AppState>>, tab_id: TabId, event: PageLoadEve
         PageLoadEvent::Finished => {
             sync_tab_from_webview(state, tab_id);
             hide_loading_overlay(state, tab_id);
+            let is_rutube = state
+                .borrow()
+                .tab(tab_id)
+                .is_some_and(|tab| tab.url.contains("rutube.ru"));
+            if is_rutube {
+                if let Some(webview) = state
+                    .borrow()
+                    .tab(tab_id)
+                    .and_then(|tab| tab.webview.as_ref())
+                {
+                    let _ = webview.evaluate_script(RUTUBE_SKIP_JS);
+                }
+            }
             if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
                 tab.loading = false;
                 tab.retry_count = 0;

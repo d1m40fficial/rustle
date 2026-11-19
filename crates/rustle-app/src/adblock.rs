@@ -305,13 +305,7 @@ pub fn spawn_loader(proxy: EventLoopProxy<AppEvent>, force: bool, allow_network:
     });
 }
 
-const BUILTIN_CUSTOM: &[&str] = &[
-    "||rutube.ru/api/advert^",
-    "rutube.ru##.advert",
-    "rutube.ru##[class*=\"advert\"]",
-    "rutube.ru##[id*=\"advert\"]",
-    "rutube.ru##.video-ad",
-];
+const BUILTIN_CUSTOM: &[&str] = &["||rutube.ru/api/advert^"];
 
 pub fn build_custom(rules: &[String]) -> Option<FilterEngine> {
     let text = BUILTIN_CUSTOM
