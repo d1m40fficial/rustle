@@ -734,6 +734,20 @@
     requestTileFavicons(items);
   };
 
+  const formatSpeed = (bytes) => {
+    if (!bytes || bytes <= 0) return "";
+    return formatBytes(Math.round(bytes)) + "/с";
+  };
+  const formatEta = (seconds) => {
+    if (!seconds || seconds <= 0) return "";
+    const total = Math.round(seconds);
+    if (total < 60) return total + " с";
+    const minutes = Math.floor(total / 60);
+    const rest = total % 60;
+    if (minutes < 60) return minutes + " мин " + rest + " с";
+    return Math.floor(minutes / 60) + " ч " + (minutes % 60) + " мин";
+  };
+
   const formatBytes = (bytes) => {
     if (!bytes) {
       return "";
@@ -1382,7 +1396,7 @@
     const toolbarHidden = payload.settings?.toolbarHidden || [];
     const toolbarMap = {
       translate: byId("translate-page"),
-      downloads: document.querySelector('[data-nav="rustle://downloads"]'),
+      downloads: document.querySelector('[data-newtab="rustle://downloads"]'),
       theme: byId("theme-toggle"),
     };
     Object.entries(toolbarMap).forEach(([key, node]) => {
@@ -2029,6 +2043,12 @@
     });
 
     document.addEventListener("click", (event) => {
+      const newTab = event.target.closest("[data-newtab]");
+      if (newTab) {
+        event.preventDefault();
+        send({ type: "tabs.newUrl", url: newTab.dataset.newtab });
+        return;
+      }
       const nav = event.target.closest("[data-nav]");
       if (nav) {
         event.preventDefault();
@@ -2546,7 +2566,7 @@
     { label: "Настройки", hint: "rustle://settings", run: () => send({ type: "nav.go", url: "rustle://settings" }) },
     { label: "История", hint: "rustle://history", run: () => send({ type: "nav.go", url: "rustle://history" }) },
     { label: "Закладки", hint: "rustle://bookmarks", run: () => send({ type: "nav.go", url: "rustle://bookmarks" }) },
-    { label: "Загрузки", hint: "rustle://downloads", run: () => send({ type: "nav.go", url: "rustle://downloads" }) },
+    { label: "Загрузки", hint: "новая вкладка", run: () => send({ type: "tabs.newUrl", url: "rustle://downloads" }) },
     { label: "Библиотека сессий", hint: "rustle://settings", run: () => send({ type: "nav.go", url: "rustle://settings" }) },
     { label: "Закрыть вкладку", hint: "Ctrl+W", run: () => send({ type: "tabs.close", id: current.activeId }) },
     { label: "Выгрузить неактивные вкладки", hint: "память", run: () => send({ type: "tabs.unloadInactive" }) },

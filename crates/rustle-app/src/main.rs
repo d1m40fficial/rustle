@@ -83,6 +83,30 @@ const SIDEBAR_COLLAPSED: u32 = 56;
 const CHROME_URL: &str = "rustle://localhost/chrome/index.html";
 const NEWTAB_URL: &str = "rustle://localhost/newtab/index.html";
 
+const LOADING_OVERLAY_JS: &str = r#"(function(){
+  var id = "rustle-loading-overlay";
+  var old = document.getElementById(id);
+  if (old) old.remove();
+  var overlay = document.createElement("div");
+  overlay.id = id;
+  overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:#1f1f1f";
+  var dots = document.createElement("div");
+  dots.style.cssText = "display:flex;gap:18px";
+  for (var i = 0; i < 3; i++) {
+    var dot = document.createElement("span");
+    dot.style.cssText = "width:22px;height:22px;border-radius:50%;background:#e6e6e6;display:block;animation:rustle-bounce 1s infinite ease-in-out";
+    dot.style.animationDelay = (i * 0.14) + "s";
+    dots.appendChild(dot);
+  }
+  var style = document.createElement("style");
+  style.textContent = "@keyframes rustle-bounce{0%,80%,100%{transform:translateY(0);opacity:.45}40%{transform:translateY(-26px);opacity:1}}";
+  overlay.appendChild(dots);
+  document.documentElement.appendChild(style);
+  document.documentElement.appendChild(overlay);
+})();"#;
+const LOADING_HIDE_JS: &str =
+    r#"(function(){var e=document.getElementById("rustle-loading-overlay");if(e)e.remove();})();"#;
+
 const PIP_JS: &str = r#"(async function(){
   if (document.pictureInPictureElement) {
     try { await document.exitPictureInPicture(); } catch (error) {}
@@ -180,6 +204,7 @@ enum AppEvent {
     Maintenance,
     UpdateStatus(String),
     RefreshResize,
+    RetryActive,
     Vertical(bool),
     CreateGroup { name: String, tab: Option<TabId> },
     ToggleGroup(u64),
@@ -221,6 +246,7 @@ struct Tab {
     cosmetic_exceptions: HashSet<String>,
     cosmetic_injected: HashSet<String>,
     last_active: Instant,
+    retry_count: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -256,6 +282,7 @@ impl Tab {
             cosmetic_exceptions: HashSet::new(),
             cosmetic_injected: HashSet::new(),
             last_active: Instant::now(),
+            retry_count: 0,
         }
     }
 }
@@ -274,6 +301,9 @@ struct DownloadEntry {
     total: i64,
     state: String,
     paused: bool,
+    speed_bps: f64,
+    last_received: i64,
+    last_sample: Instant,
     #[cfg(target_os = "windows")]
     operation: Option<ICoreWebView2DownloadOperation>,
 }
@@ -1589,6 +1619,7 @@ fn on_navigation(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: String) {
         };
         let had_error = tab.error.take().is_some();
         tab.url = url;
+        tab.retry_count = 0;
         tab.favicon = cached_favicon(&tab.url);
         tab.title.clear();
         tab.loading = true;
@@ -1647,17 +1678,40 @@ fn on_title(state: &Rc<RefCell<AppState>>, tab_id: TabId, title: String) {
     save_session_due(state);
 }
 
+fn show_loading_overlay(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
+    if let Some(webview) = state
+        .borrow()
+        .tab(tab_id)
+        .and_then(|tab| tab.webview.as_ref())
+    {
+        let _ = webview.evaluate_script(LOADING_OVERLAY_JS);
+    }
+}
+
+fn hide_loading_overlay(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
+    if let Some(webview) = state
+        .borrow()
+        .tab(tab_id)
+        .and_then(|tab| tab.webview.as_ref())
+    {
+        let _ = webview.evaluate_script(LOADING_HIDE_JS);
+    }
+}
+
 fn on_page_load(state: &Rc<RefCell<AppState>>, tab_id: TabId, event: PageLoadEvent) {
     match event {
         PageLoadEvent::Started => {
             if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
                 tab.loading = true;
             }
+            show_loading_overlay(state, tab_id);
         }
         PageLoadEvent::Finished => {
             sync_tab_from_webview(state, tab_id);
+            hide_loading_overlay(state, tab_id);
             if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
                 tab.loading = false;
+                tab.retry_count = 0;
             }
             request_tab_favicon(state, tab_id);
             let page_url = state
@@ -1960,6 +2014,9 @@ fn reload_active(state: &Rc<RefCell<AppState>>) {
     };
 
     if error {
+        if let Some(tab) = state.borrow_mut().tab_mut(active) {
+            tab.retry_count = 0;
+        }
         navigate_active(state, &url);
         return;
     }
@@ -2226,6 +2283,29 @@ fn install_tab_navigation_handlers(
 
         let error = error_info(status);
         eprintln!("[nav] tab {} failed: {}", tab_id.0, error.code);
+        let attempts = state
+            .borrow()
+            .tab(tab_id)
+            .map(|tab| tab.retry_count)
+            .unwrap_or(0);
+        let transient = matches!(
+            error.code.as_str(),
+            "other" | "connect" | "timeout" | "reset" | "dns"
+        );
+        if transient && attempts < 3 {
+            if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+                tab.retry_count = attempts + 1;
+                tab.loading = true;
+            }
+            show_loading_overlay(&state, tab_id);
+            let proxy = state.borrow().proxy.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(700 + u64::from(attempts) * 500));
+                let _ = proxy.send_event(AppEvent::RetryActive);
+            });
+            return Ok(());
+        }
+        hide_loading_overlay(&state, tab_id);
         set_tab_error(&state, tab_id, error);
         Ok(())
     }));
@@ -3682,6 +3762,12 @@ fn downloads_payload(state: &AppState) -> Value {
                 "total": download.total,
                 "state": download.state,
                 "paused": download.paused,
+                "speed": download.speed_bps,
+                "eta": if download.speed_bps > 1.0 && download.total > download.received {
+                    (download.total - download.received) as f64 / download.speed_bps
+                } else {
+                    0.0
+                },
             })
         })
         .collect();
@@ -3703,6 +3789,21 @@ fn update_download(
             .iter_mut()
             .find(|download| download.id == id)
         {
+            let now = Instant::now();
+            let elapsed = now.duration_since(download.last_sample).as_secs_f64();
+            if elapsed >= 0.15 && status == "progress" {
+                let delta = (received - download.last_received).max(0) as f64;
+                let instant = delta / elapsed;
+                download.speed_bps = if download.speed_bps <= 0.0 {
+                    instant
+                } else {
+                    download.speed_bps * 0.7 + instant * 0.3
+                };
+                download.last_received = received;
+                download.last_sample = now;
+            } else if status != "progress" {
+                download.speed_bps = 0.0;
+            }
             download.received = received;
             if total > 0 {
                 download.total = total;
@@ -3836,6 +3937,9 @@ fn install_download_handler(state: &Rc<RefCell<AppState>>, webview: &WebView, _t
                 total: 0,
                 state: "progress".to_owned(),
                 paused: false,
+                speed_bps: 0.0,
+                last_received: 0,
+                last_sample: Instant::now(),
                 operation: Some(operation.clone()),
             });
             id
@@ -5945,6 +6049,12 @@ unsafe extern "system" fn resize_mouse_hook(code: i32, wparam: usize, lparam: is
 }
 
 #[cfg(target_os = "windows")]
+#[link(name = "dwmapi")]
+unsafe extern "system" {
+    fn DwmSetWindowAttribute(hwnd: isize, attribute: u32, value: *const u32, size: u32) -> i32;
+}
+
+#[cfg(target_os = "windows")]
 static RESIZE_OVERLAYS: std::sync::Mutex<[isize; 8]> = std::sync::Mutex::new([0; 8]);
 
 #[cfg(target_os = "windows")]
@@ -6274,15 +6384,40 @@ unsafe extern "system" fn resize_subclass(
             GetWindowRect(hwnd, &mut window);
             let hdc = GetWindowDC(hwnd);
             if hdc != 0 {
-                let brush = CreateSolidBrush(0x00252525);
+                let width = window.right - window.left;
+                let height = window.bottom - window.top;
+                let side_brush = CreateSolidBrush(0x001f1f1f);
+                let left = ResizeRect {
+                    left: 0,
+                    top: 0,
+                    right: 8,
+                    bottom: height,
+                };
+                let right = ResizeRect {
+                    left: width - 8,
+                    top: 0,
+                    right: width,
+                    bottom: height,
+                };
+                let bottom = ResizeRect {
+                    left: 0,
+                    top: height - 8,
+                    right: width,
+                    bottom: height,
+                };
+                FillRect(hdc, &left, side_brush);
+                FillRect(hdc, &right, side_brush);
+                FillRect(hdc, &bottom, side_brush);
+                DeleteObject(side_brush);
+                let top_brush = CreateSolidBrush(0x00252525);
                 let top = ResizeRect {
                     left: 0,
                     top: 0,
-                    right: window.right - window.left,
-                    bottom: 8,
+                    right: width,
+                    bottom: 6,
                 };
-                FillRect(hdc, &top, brush);
-                DeleteObject(brush);
+                FillRect(hdc, &top, top_brush);
+                DeleteObject(top_brush);
                 ReleaseDC(hwnd, hdc);
             }
         }
@@ -6614,6 +6749,14 @@ fn main() -> wry::Result<()> {
             .expect("create window"),
     );
     window.set_undecorated_shadow(false);
+    #[cfg(target_os = "windows")]
+    {
+        let border_color = 34u32;
+        let none_color = 0xFFFF_FFFEu32;
+        unsafe {
+            let _ = DwmSetWindowAttribute(window.hwnd(), border_color, &none_color, 4);
+        }
+    }
     #[cfg(target_os = "windows")]
     enable_frameless_resize(&window);
     mark("window");
@@ -7008,6 +7151,9 @@ fn main() -> wry::Result<()> {
             Event::UserEvent(AppEvent::Title(tab_id, title)) => {
                 on_title(&state, tab_id, title);
             }
+            Event::UserEvent(AppEvent::RetryActive) => {
+                reload_active(&state);
+            }
             Event::UserEvent(AppEvent::RefreshResize) => {
                 #[cfg(target_os = "windows")]
                 refresh_resize_passthrough(&state);
@@ -7099,6 +7245,9 @@ fn main() -> wry::Result<()> {
                         total: record.total,
                         state: record.state,
                         paused: false,
+                        speed_bps: 0.0,
+                        last_received: record.received,
+                        last_sample: Instant::now(),
                         #[cfg(target_os = "windows")]
                         operation: None,
                     })
