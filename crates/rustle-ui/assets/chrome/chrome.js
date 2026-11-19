@@ -856,6 +856,15 @@
   const renderProfiles = () => {
     const profiles = current.profiles || [];
     const active = current.activeProfile || 0;
+    const activeProfile = profiles.find((profile) => profile.id === active);
+    const avatar = byId("profile-avatar");
+    const avatarText = byId("profile-avatar-text");
+    if (activeProfile && avatarText && avatar) {
+      avatarText.textContent = (activeProfile.name || "?").slice(0, 1).toUpperCase();
+      let hue = 0;
+      for (const ch of activeProfile.name || "") hue = (hue * 31 + ch.charCodeAt(0)) % 360;
+      avatar.style.background = "hsl(" + hue + " 55% 58%)";
+    }
     const overlay = byId("profile-overlay");
     if (overlay) {
       overlay.hidden = current.profilePending !== true;
@@ -866,7 +875,12 @@
           const button = document.createElement("button");
           button.type = "button";
           button.className = "profile-choice" + (profile.id === selectedProfile ? " is-active" : "");
-          button.textContent = profile.name + (profile.pin ? " 🔒" : "");
+          let hue = 0;
+          for (const ch of profile.name || "") hue = (hue * 31 + ch.charCodeAt(0)) % 360;
+          const dot = document.createElement("span");
+          dot.className = "profile-choice__dot";
+          dot.style.background = "hsl(" + hue + " 55% 58%)";
+          button.append(dot, document.createTextNode(profile.name + (profile.pin ? " 🔒" : "")));
           button.addEventListener("click", () => {
             selectedProfile = profile.id;
             if (!profile.pin) {
@@ -2768,6 +2782,11 @@
       if (byId("profile-name")) byId("profile-name").value = "";
       if (byId("profile-new-pin")) byId("profile-new-pin").value = "";
     });
+  }
+
+  const profileAvatar = byId("profile-avatar");
+  if (profileAvatar) {
+    profileAvatar.addEventListener("click", () => send({ type: "profile.picker" }));
   }
 
   initParticleHero();

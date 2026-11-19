@@ -2906,6 +2906,10 @@ fn select_profile(state: &Rc<RefCell<AppState>>, id: u64, pin: &str) {
         });
         save_profiles(&state_ref.profiles);
     }
+    if state.borrow().tabs.is_empty() {
+        new_tab(state);
+        return;
+    }
     let active = state.borrow().active;
     ensure_tab_webview(state, active);
     apply_layout(state);
@@ -5626,6 +5630,12 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             find_in_page(state, text, forward);
         }
         Some("settings.export") => export_config(state),
+        Some("profile.picker") => {
+            state.borrow_mut().profile_pending = true;
+            state.borrow_mut().profile_error.clear();
+            apply_layout(state);
+            push_ui_state(state);
+        }
         Some("profile.select") => {
             if let Some(id) = message.get("id").and_then(|value| value.as_u64()) {
                 let pin = message

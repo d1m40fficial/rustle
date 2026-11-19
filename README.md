@@ -18,7 +18,7 @@
 - Свои правила: домены, `||domain^`, `@@`-исключения, regex и косметика.
 - Whitelist текущего сайта и журнал последних блокировок.
 - Контейнеры cookie на профилях WebView2.
-- Профили с отдельными cookie, PIN из 4 цифр и запросом профиля при запуске.\n- Приватное окно без сохранения истории и сессии.
+- Профили с отдельными cookie, PIN из 4 цифр, аватаром и запросом профиля при запуске.\n- Приватное окно без сохранения истории и сессии.
 
 **Работа с сессиями**
 - Библиотека сессий: название, теги, поиск, переименование, цветные обложки.
@@ -69,7 +69,7 @@
 
 ```powershell
 cargo build --release
-./scripts/build-release.ps1 -Version 0.32.0
+./scripts/build-release.ps1 -Version 0.33.0
 ```
 
 Нужны Rust stable, MinGW/MSVC и Inno Setup. Portable-сборка кладёт `WebView2Loader.dll` рядом с `rustle.exe`.
@@ -101,7 +101,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## Планы
 
-См. [docs/ROADMAP.md](docs/ROADMAP.md): IPC/UI-тесты, полный ABP-синтаксис, очередь загрузок, редактор хоткеев, tree-tabs, split-screen, расширения и синхронизация.
+См. [docs/PLAN.md](docs/PLAN.md) и [docs/ROADMAP.md](docs/ROADMAP.md): IPC/UI-тесты, полный ABP-синтаксис, очередь загрузок, редактор хоткеев, tree-tabs, split-screen, расширения и синхронизация.
 
 ## Лицензия
 
