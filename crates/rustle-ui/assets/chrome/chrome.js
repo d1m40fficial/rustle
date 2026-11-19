@@ -1347,6 +1347,8 @@
     }
     if (false) {
     }
+    const windowControlsStyle = payload.settings?.windowControls || "standard";
+    document.body.classList.toggle("window-controls-standard", windowControlsStyle === "standard");
     const toolbarHidden = payload.settings?.toolbarHidden || [];
     const toolbarMap = {
       translate: byId("translate-page"),
@@ -2350,6 +2352,9 @@
     let suppressWindowClick = false;
     if (windowControls) {
       windowControls.addEventListener("pointerdown", (event) => {
+        if (document.body.classList.contains("window-controls-standard")) {
+          return;
+        }
         if (event.button !== 0) {
           return;
         }

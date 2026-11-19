@@ -1890,3 +1890,36 @@ html.vertical-mode .switcher-overlay {
 
 .toolbar-toggles { display: flex; gap: 14px; flex-wrap: wrap; }
 .toolbar-toggles label { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: 12px; }
+
+.window-controls-standard .window-controls {
+  right: 0;
+  gap: 0;
+  padding: 0;
+  height: 44px;
+}
+.window-controls-standard .window-control {
+  width: 46px;
+  height: 44px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+}
+.window-controls-standard .window-control svg {
+  width: 12px;
+  height: 12px;
+  opacity: 0.86;
+}
+.window-controls-standard .window-control:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.window-controls-standard .window-control--close:hover {
+  background: #c42b1c;
+  color: #fff;
+}
+.window-controls-standard .window-control--close:hover svg {
+  opacity: 1;
+}
+.window-controls-standard .toolbar {
+  padding-right: 146px;
+}

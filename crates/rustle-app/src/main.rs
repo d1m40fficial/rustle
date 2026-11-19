@@ -810,6 +810,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                 "adblockExceptions": state.settings.adblock_exceptions,
                 "autoSuspendMinutes": state.settings.auto_suspend_minutes,
                 "toolbarHidden": state.settings.toolbar_hidden,
+                "windowControls": state.settings.window_controls,
                 "toolbarHidden": state.settings.toolbar_hidden,
             },
             "adblockStatus": state.adblock_info.to_json(),
@@ -5618,6 +5619,14 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 .and_then(|value| value.as_u64())
             {
                 settings.auto_suspend_minutes = minutes.min(240) as u32;
+            }
+            if let Some(value) = message
+                .get("windowControls")
+                .and_then(|value| value.as_str())
+            {
+                if matches!(value, "traffic" | "standard") {
+                    settings.window_controls = value.to_owned();
+                }
             }
             if let Some(values) = message
                 .get("toolbarHidden")
