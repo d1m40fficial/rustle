@@ -205,6 +205,7 @@ enum AppEvent {
     UpdateStatus(String),
     RefreshResize,
     RetryActive,
+    SwitchProfile(u64, String),
     Vertical(bool),
     CreateGroup { name: String, tab: Option<TabId> },
     ToggleGroup(u64),
@@ -2896,16 +2897,20 @@ fn select_profile(state: &Rc<RefCell<AppState>>, id: u64, pin: &str) {
         push_ui_state(state);
         return;
     }
-    {
+    let old_webviews: Vec<WebView> = {
         let mut state_ref = state.borrow_mut();
         state_ref.profiles.active = id;
         state_ref.profile_error.clear();
         state_ref.profile_pending = false;
-        state_ref.tabs.iter_mut().for_each(|tab| {
-            let _ = tab.webview.take();
-        });
+        let views = state_ref
+            .tabs
+            .iter_mut()
+            .filter_map(|tab| tab.webview.take())
+            .collect();
         save_profiles(&state_ref.profiles);
-    }
+        views
+    };
+    drop(old_webviews);
     if state.borrow().tabs.is_empty() {
         new_tab(state);
         return;
@@ -2948,20 +2953,26 @@ fn delete_profile(state: &Rc<RefCell<AppState>>, id: u64) {
     if !can_delete {
         return;
     }
-    {
+    let old_webviews: Vec<WebView> = {
         let mut state_ref = state.borrow_mut();
         state_ref
             .profiles
             .profiles
             .retain(|profile| profile.id != id);
-        if state_ref.profiles.active == id {
+        let views = if state_ref.profiles.active == id {
             state_ref.profiles.active = state_ref.profiles.profiles[0].id;
-            state_ref.tabs.iter_mut().for_each(|tab| {
-                let _ = tab.webview.take();
-            });
-        }
+            state_ref
+                .tabs
+                .iter_mut()
+                .filter_map(|tab| tab.webview.take())
+                .collect()
+        } else {
+            Vec::new()
+        };
         save_profiles(&state_ref.profiles);
-    }
+        views
+    };
+    drop(old_webviews);
     let active = state.borrow().active;
     ensure_tab_webview(state, active);
     apply_layout(state);
@@ -5641,8 +5652,12 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 let pin = message
                     .get("pin")
                     .and_then(|value| value.as_str())
-                    .unwrap_or("");
-                select_profile(state, id, pin);
+                    .unwrap_or("")
+                    .to_owned();
+                let _ = state
+                    .borrow()
+                    .proxy
+                    .send_event(AppEvent::SwitchProfile(id, pin));
             }
         }
         Some("profile.create") => {
@@ -7400,6 +7415,9 @@ fn main() -> wry::Result<()> {
             }
             Event::UserEvent(AppEvent::RetryActive) => {
                 reload_active(&state);
+            }
+            Event::UserEvent(AppEvent::SwitchProfile(id, pin)) => {
+                select_profile(&state, id, &pin);
             }
             Event::UserEvent(AppEvent::RefreshResize) => {
                 #[cfg(target_os = "windows")]
