@@ -349,6 +349,9 @@ struct AppState {
     update_status: String,
     resize_session: Option<ResizeSession>,
     settings_dirty: bool,
+    profiles: ProfilesFile,
+    profile_pending: bool,
+    profile_error: String,
     blocked_log: Vec<Value>,
 }
 
@@ -409,6 +412,9 @@ impl AppState {
             update_status: String::new(),
             resize_session: None,
             settings_dirty: false,
+            profiles: ProfilesFile::default(),
+            profile_pending: false,
+            profile_error: String::new(),
             blocked_log: Vec::new(),
         }
     }
@@ -822,6 +828,11 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
             "sessions": state.saved_sessions,
             "webview2Version": state.webview2_version,
             "updateStatus": state.update_status,
+            "profiles": state.profiles.profiles,
+            "activeProfile": state.profiles.active,
+            "askProfile": state.profiles.ask_on_start,
+            "profilePending": state.profile_pending,
+            "profileError": state.profile_error,
             "groups": state.groups.iter().map(|group| json!({"id": group.id, "name": group.name, "collapsed": group.collapsed})).collect::<Vec<_>>(),
             "secure": url.starts_with("https://"),
             "bookmarks": state.bookmarks,
@@ -1451,6 +1462,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
         sidebar_width_setting,
         prompt_open,
         switcher_open,
+        profile_pending,
     ) = {
         let state = state.borrow();
         let overlay_mode = state.active_tab().is_some_and(|tab| {
@@ -1469,6 +1481,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             state.settings.sidebar_width.clamp(72, SIDEBAR_WIDTH),
             state.prompt_open,
             state.switcher_open,
+            state.profile_pending,
         )
     };
 
@@ -1503,7 +1516,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             (target_top, target_side, vertical, false)
         }
     };
-    let chrome_height = if overlay_mode || prompt_open || switcher_open {
+    let chrome_height = if profile_pending || overlay_mode || prompt_open || switcher_open {
         height
     } else if dropdown_open {
         (dropdown_height + top.saturating_sub(CHROME_COLLAPSED)).clamp(top, height)
@@ -1520,7 +1533,8 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             let _ = chrome.set_bounds(rect(0, 0, width, chrome_height));
         }
         if let Some(sidebar) = &state.sidebar {
-            let sidebar_visible = sidebar_visible && !prompt_open && !switcher_open;
+            let sidebar_visible =
+                sidebar_visible && !prompt_open && !switcher_open && !profile_pending;
             let _ = sidebar.set_visible(sidebar_visible);
             if sidebar_visible {
                 let _ = sidebar.set_bounds(rect(0, top, sidebar_width, height.saturating_sub(top)));
@@ -1531,7 +1545,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             let Some(webview) = &tab.webview else {
                 continue;
             };
-            if overlay_mode {
+            if overlay_mode || profile_pending {
                 let _ = webview.set_visible(false);
             } else if tab.id == active {
                 let _ = webview.set_visible(true);
@@ -1740,7 +1754,10 @@ fn on_page_load(state: &Rc<RefCell<AppState>>, tab_id: TabId, event: PageLoadEve
 }
 
 fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
-    let (url, visible, width, height, top, window, proxy, container) = {
+    if state.borrow().profile_pending {
+        return;
+    }
+    let (url, visible, width, height, top, window, proxy, container, profile_id) = {
         let state = state.borrow();
         let Some(tab) = state.tab(tab_id) else {
             return;
@@ -1761,6 +1778,7 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
             state.window.clone(),
             state.proxy.clone(),
             tab.container.clone(),
+            state.profiles.active,
         )
     };
 
@@ -1852,10 +1870,16 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
         .with_url(&url);
 
     #[cfg(target_os = "windows")]
-    let builder = if let Some(container) = container.as_deref() {
-        builder.with_profile_name(format!("rustle-{container}"))
+    let builder = if profile_id == 1 {
+        if let Some(container) = container.as_deref() {
+            builder.with_profile_name(format!("rustle-{container}"))
+        } else {
+            builder
+        }
+    } else if let Some(container) = container.as_deref() {
+        builder.with_profile_name(format!("rustle-profile-{profile_id}-{container}"))
     } else {
-        builder
+        builder.with_profile_name(format!("rustle-profile-{profile_id}"))
     };
     let result = builder.build_as_child(window.as_ref());
     state.borrow_mut().context = Some(context);
@@ -2699,6 +2723,65 @@ fn new_tab_in_group(state: &Rc<RefCell<AppState>>, group_id: u64) {
     focus_address(state);
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct Profile {
+    id: u64,
+    name: String,
+    #[serde(default)]
+    pin: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct ProfilesFile {
+    #[serde(default)]
+    ask_on_start: bool,
+    active: u64,
+    profiles: Vec<Profile>,
+}
+
+impl Default for ProfilesFile {
+    fn default() -> Self {
+        Self {
+            ask_on_start: false,
+            active: 1,
+            profiles: vec![Profile {
+                id: 1,
+                name: "Личный".to_owned(),
+                pin: String::new(),
+            }],
+        }
+    }
+}
+
+fn profiles_path() -> PathBuf {
+    rustle_storage::data_dir().join("profiles.json")
+}
+
+fn load_profiles() -> ProfilesFile {
+    let Ok(bytes) = fs::read(profiles_path()) else {
+        return ProfilesFile::default();
+    };
+    let mut profiles = serde_json::from_slice::<ProfilesFile>(&bytes).unwrap_or_default();
+    if profiles.profiles.is_empty() {
+        profiles = ProfilesFile::default();
+    }
+    if !profiles
+        .profiles
+        .iter()
+        .any(|profile| profile.id == profiles.active)
+    {
+        profiles.active = profiles.profiles[0].id;
+    }
+    profiles
+}
+
+fn save_profiles(profiles: &ProfilesFile) {
+    let _ = fs::create_dir_all(rustle_storage::data_dir());
+    if let Ok(bytes) = serde_json::to_vec_pretty(profiles) {
+        let _ = fs::write(profiles_path(), bytes);
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 struct SavedSessionFile {
     name: String,
@@ -2798,6 +2881,106 @@ fn unload_inactive_tabs(state: &Rc<RefCell<AppState>>) {
     }
     push_ui_state(state);
     save_session_due(state);
+}
+
+fn select_profile(state: &Rc<RefCell<AppState>>, id: u64, pin: &str) {
+    let valid = state
+        .borrow()
+        .profiles
+        .profiles
+        .iter()
+        .find(|profile| profile.id == id)
+        .is_some_and(|profile| profile.pin.is_empty() || profile.pin == pin);
+    if !valid {
+        state.borrow_mut().profile_error = "Неверный PIN".to_owned();
+        push_ui_state(state);
+        return;
+    }
+    {
+        let mut state_ref = state.borrow_mut();
+        state_ref.profiles.active = id;
+        state_ref.profile_error.clear();
+        state_ref.profile_pending = false;
+        state_ref.tabs.iter_mut().for_each(|tab| {
+            let _ = tab.webview.take();
+        });
+        save_profiles(&state_ref.profiles);
+    }
+    let active = state.borrow().active;
+    ensure_tab_webview(state, active);
+    apply_layout(state);
+    push_ui_state(state);
+}
+
+fn create_profile(state: &Rc<RefCell<AppState>>, name: &str, pin: &str) {
+    let name = name.trim();
+    if name.is_empty()
+        || (!pin.is_empty() && (pin.len() != 4 || !pin.chars().all(|ch| ch.is_ascii_digit())))
+    {
+        return;
+    }
+    {
+        let mut state_ref = state.borrow_mut();
+        let id = state_ref
+            .profiles
+            .profiles
+            .iter()
+            .map(|profile| profile.id)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        state_ref.profiles.profiles.push(Profile {
+            id,
+            name: name.to_owned(),
+            pin: pin.to_owned(),
+        });
+        save_profiles(&state_ref.profiles);
+    }
+    push_ui_state(state);
+}
+
+fn delete_profile(state: &Rc<RefCell<AppState>>, id: u64) {
+    let can_delete = state.borrow().profiles.profiles.len() > 1;
+    if !can_delete {
+        return;
+    }
+    {
+        let mut state_ref = state.borrow_mut();
+        state_ref
+            .profiles
+            .profiles
+            .retain(|profile| profile.id != id);
+        if state_ref.profiles.active == id {
+            state_ref.profiles.active = state_ref.profiles.profiles[0].id;
+            state_ref.tabs.iter_mut().for_each(|tab| {
+                let _ = tab.webview.take();
+            });
+        }
+        save_profiles(&state_ref.profiles);
+    }
+    let active = state.borrow().active;
+    ensure_tab_webview(state, active);
+    apply_layout(state);
+    push_ui_state(state);
+}
+
+fn set_profile_pin(state: &Rc<RefCell<AppState>>, id: u64, pin: &str) {
+    if !pin.is_empty() && (pin.len() != 4 || !pin.chars().all(|ch| ch.is_ascii_digit())) {
+        return;
+    }
+    {
+        let mut state_ref = state.borrow_mut();
+        if let Some(profile) = state_ref
+            .profiles
+            .profiles
+            .iter_mut()
+            .find(|profile| profile.id == id)
+        {
+            profile.pin = pin.to_owned();
+        }
+        save_profiles(&state_ref.profiles);
+    }
+    push_ui_state(state);
 }
 
 fn save_named_session(state: &Rc<RefCell<AppState>>, name: &str, tags: &[String]) {
@@ -5443,6 +5626,47 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             find_in_page(state, text, forward);
         }
         Some("settings.export") => export_config(state),
+        Some("profile.select") => {
+            if let Some(id) = message.get("id").and_then(|value| value.as_u64()) {
+                let pin = message
+                    .get("pin")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("");
+                select_profile(state, id, pin);
+            }
+        }
+        Some("profile.create") => {
+            if let (Some(name), Some(pin)) = (
+                message.get("name").and_then(|value| value.as_str()),
+                message.get("pin").and_then(|value| value.as_str()),
+            ) {
+                create_profile(state, name, pin);
+            }
+        }
+        Some("profile.delete") => {
+            if let Some(id) = message.get("id").and_then(|value| value.as_u64()) {
+                delete_profile(state, id);
+            }
+        }
+        Some("profile.pin") => {
+            if let Some(id) = message.get("id").and_then(|value| value.as_u64()) {
+                let pin = message
+                    .get("pin")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("");
+                set_profile_pin(state, id, pin);
+            }
+        }
+        Some("profile.ask") => {
+            let ask = message
+                .get("ask")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            state.borrow_mut().profiles.ask_on_start = ask;
+            let profiles = state.borrow().profiles.clone();
+            save_profiles(&profiles);
+            push_ui_state(state);
+        }
         Some("settings.exceptions") => {
             if let Some(values) = message.get("values").and_then(|value| value.as_array()) {
                 let exceptions: Vec<String> = values
@@ -6838,6 +7062,17 @@ fn main() -> wry::Result<()> {
         state.sidebar_collapsed = settings.sidebar_collapsed;
 
         state.bookmarks = startup_bookmarks;
+        if !private {
+            let profiles = load_profiles();
+            let active_locked = profiles
+                .profiles
+                .iter()
+                .find(|profile| profile.id == profiles.active)
+                .is_some_and(|profile| !profile.pin.is_empty());
+            state.profile_pending =
+                active_locked || (profiles.ask_on_start && profiles.profiles.len() > 1);
+            state.profiles = profiles;
+        }
         state.storage = if private {
             None
         } else {
@@ -6873,7 +7108,9 @@ fn main() -> wry::Result<()> {
     state.borrow_mut().recovered = recovered;
 
     let active = state.borrow().active;
-    ensure_tab_webview(&state, active);
+    if !state.borrow().profile_pending {
+        ensure_tab_webview(&state, active);
+    }
     mark("content");
 
     create_chrome(&state)?;

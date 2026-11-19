@@ -92,7 +92,7 @@
         <div class="newtab__brand">Rustle</div>
         <canvas class="newtab__particles" id="newtab-particles"></canvas>
       </div>
-      <p class="newtab__tagline">Минималистичный браузер. 0.31.0.</p>
+      <p class="newtab__tagline">Минималистичный браузер. 0.32.0.</p>
 
       <form class="newtab__search" id="newtab-search" role="search">
         <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
@@ -105,7 +105,7 @@
         <button class="newtab__add newtab__edit" id="newtab-edit" type="button">✎ Редактировать плитки</button>
       </div>
 
-      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.31.0</span></p>
+      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.32.0</span></p>
     </div>
   </section>
 
@@ -316,6 +316,19 @@
       </label>
       <div class="settings__row settings__row--stack">
         <span>
+          <strong>Профили</strong>
+          <small>Отдельные cookie и данные сайтов. PIN — 4 цифры.</small>
+        </span>
+        <label class="profile-ask"><input type="checkbox" id="profile-ask"> Спрашивать профиль при открытии</label>
+        <div class="profile-settings-list" id="profile-settings-list"></div>
+        <div class="profile-create">
+          <input id="profile-name" type="text" placeholder="Название профиля" autocomplete="off">
+          <input id="profile-new-pin" type="password" inputmode="numeric" maxlength="4" placeholder="PIN (необязательно)" autocomplete="off">
+          <button class="button" id="profile-create" type="button">Создать профиль</button>
+        </div>
+      </div>
+      <div class="settings__row settings__row--stack">
+        <span>
           <strong>Кнопки панели</strong>
           <small>Что показывать в верхней панели.</small>
         </span>
@@ -384,6 +397,17 @@
     <div class="palette" role="dialog" aria-modal="true">
       <input class="palette__input" id="palette-input" type="text" placeholder="Команда или вкладка…" autocomplete="off">
       <div class="palette__list" id="palette-list"></div>
+    </div>
+  </div>
+
+  <div class="profile-overlay" id="profile-overlay" hidden>
+    <div class="profile-card">
+      <h2>Выберите профиль</h2>
+      <p class="page-hint">Данные профилей хранятся отдельно.</p>
+      <div class="profile-list" id="profile-list"></div>
+      <input class="profile-pin" id="profile-pin" type="password" inputmode="numeric" maxlength="4" placeholder="PIN (4 цифры)" autocomplete="off">
+      <span class="profile-error" id="profile-error"></span>
+      <button class="button button--primary" id="profile-enter" type="button">Войти</button>
     </div>
   </div>
 

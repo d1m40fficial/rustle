@@ -305,9 +305,21 @@ pub fn spawn_loader(proxy: EventLoopProxy<AppEvent>, force: bool, allow_network:
     });
 }
 
+const BUILTIN_CUSTOM: &[&str] = &[
+    "||ads.rutube.ru^",
+    "||ad.rutube.ru^",
+    "||rutube.ru/api/advert^",
+    "rutube.ru##.advert",
+    "rutube.ru##[class*=\"advert\"]",
+    "rutube.ru##[id*=\"advert\"]",
+    "rutube.ru##.video-ad",
+];
+
 pub fn build_custom(rules: &[String]) -> Option<FilterEngine> {
-    let text = rules
+    let text = BUILTIN_CUSTOM
         .iter()
+        .copied()
+        .chain(rules.iter().map(|rule| rule.as_str()))
         .map(|rule| rule.trim())
         .filter(|rule| !rule.is_empty() && !rule.starts_with('!'))
         .collect::<Vec<_>>()

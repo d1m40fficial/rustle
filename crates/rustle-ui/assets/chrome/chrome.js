@@ -852,6 +852,80 @@
     });
   };
 
+  let selectedProfile = 0;
+  const renderProfiles = () => {
+    const profiles = current.profiles || [];
+    const active = current.activeProfile || 0;
+    const overlay = byId("profile-overlay");
+    if (overlay) {
+      overlay.hidden = current.profilePending !== true;
+      const list = byId("profile-list");
+      if (list) {
+        list.replaceChildren();
+        profiles.forEach((profile) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "profile-choice" + (profile.id === selectedProfile ? " is-active" : "");
+          button.textContent = profile.name + (profile.pin ? " 🔒" : "");
+          button.addEventListener("click", () => {
+            selectedProfile = profile.id;
+            if (!profile.pin) {
+              send({ type: "profile.select", id: profile.id, pin: "" });
+            } else {
+              const pin = byId("profile-pin");
+              if (pin) pin.focus();
+              renderProfiles();
+            }
+          });
+          list.append(button);
+        });
+      }
+      const error = byId("profile-error");
+      if (error) error.textContent = current.profileError || "";
+    }
+    const settingsList = byId("profile-settings-list");
+    if (settingsList) {
+      settingsList.replaceChildren();
+      profiles.forEach((profile) => {
+        const row = document.createElement("div");
+        row.className = "profile-row";
+        const name = document.createElement("span");
+        name.textContent = profile.name + (profile.id === active ? " · текущий" : "") + (profile.pin ? " · PIN" : "");
+        const actions = document.createElement("div");
+        actions.className = "profile-row__actions";
+        if (profile.id !== active) {
+          const use = document.createElement("button");
+          use.className = "button";
+          use.type = "button";
+          use.textContent = "Открыть";
+          use.addEventListener("click", () => {
+            if (profile.pin) openPrompt("profileopen", { id: profile.id }, "PIN профиля", "");
+            else send({ type: "profile.select", id: profile.id, pin: "" });
+          });
+          actions.append(use);
+        }
+        const pin = document.createElement("button");
+        pin.className = "button";
+        pin.type = "button";
+        pin.textContent = profile.pin ? "Сменить PIN" : "PIN";
+        pin.addEventListener("click", () => openPrompt("profilepin", { id: profile.id }, "PIN профиля (4 цифры)", ""));
+        actions.append(pin);
+        if (profiles.length > 1) {
+          const remove = document.createElement("button");
+          remove.className = "button";
+          remove.type = "button";
+          remove.textContent = "Удалить";
+          remove.addEventListener("click", () => send({ type: "profile.delete", id: profile.id }));
+          actions.append(remove);
+        }
+        row.append(name, actions);
+        settingsList.append(row);
+      });
+    }
+    const ask = byId("profile-ask");
+    if (ask) ask.checked = current.askProfile === true;
+  };
+
   const renderDownloads = (items = current.downloads || []) => {
     const list = byId("downloads-list");
     if (!list) {
@@ -1487,6 +1561,7 @@
     if (Array.isArray(payload.blockedLog)) {
       renderBlockedLog(payload.blockedLog);
     }
+    renderProfiles();
     if (Array.isArray(payload.sessions)) {
       renderSessions(payload.sessions);
     }
@@ -2669,6 +2744,30 @@
   const updateDownloadButton = byId("update-download");
   if (updateDownloadButton) {
     updateDownloadButton.addEventListener("click", () => send({ type: "nav.go", url: "https://github.com/d1m40fficial/rustle/releases/latest" }));
+  }
+
+  const profileEnter = byId("profile-enter");
+  if (profileEnter) {
+    profileEnter.addEventListener("click", () => {
+      if (selectedProfile) {
+        send({ type: "profile.select", id: selectedProfile, pin: byId("profile-pin")?.value || "" });
+      }
+    });
+  }
+  const profileAsk = byId("profile-ask");
+  if (profileAsk) {
+    profileAsk.addEventListener("change", () => send({ type: "profile.ask", ask: profileAsk.checked }));
+  }
+  const profileCreate = byId("profile-create");
+  if (profileCreate) {
+    profileCreate.addEventListener("click", () => {
+      const name = byId("profile-name")?.value.trim() || "";
+      const pin = byId("profile-new-pin")?.value || "";
+      if (!name) return;
+      send({ type: "profile.create", name, pin });
+      if (byId("profile-name")) byId("profile-name").value = "";
+      if (byId("profile-new-pin")) byId("profile-new-pin").value = "";
+    });
   }
 
   initParticleHero();
