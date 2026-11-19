@@ -953,6 +953,22 @@
     if (startup) {
       startup.value = settings.startup || "restore";
     }
+    const autoSuspend = byId("setting-auto-suspend");
+    if (autoSuspend) {
+      autoSuspend.value = String(settings.autoSuspendMinutes ?? 30);
+    }
+    const windowControlsSelect = byId("setting-window-controls");
+    if (windowControlsSelect) {
+      windowControlsSelect.value = settings.windowControls || "standard";
+    }
+    const toolbarHidden = settings.toolbarHidden || [];
+    const setToolbarToggle = (id, key) => {
+      const node = byId(id);
+      if (node) node.checked = !toolbarHidden.includes(key);
+    };
+    setToolbarToggle("toolbar-translate", "translate");
+    setToolbarToggle("toolbar-downloads", "downloads");
+    setToolbarToggle("toolbar-theme", "theme");
     const sidebarWidth = byId("setting-sidebar-width");
     if (sidebarWidth) {
       sidebarWidth.value = String(settings.sidebarWidth || 282);
@@ -1009,6 +1025,20 @@
     };
     autosaveField(exceptions);
     autosaveField(customRules);
+    if (exceptions && exceptions.dataset.directSave !== "1") {
+      exceptions.dataset.directSave = "1";
+      let exceptionTimer = 0;
+      exceptions.addEventListener("input", () => {
+        window.clearTimeout(exceptionTimer);
+        exceptionTimer = window.setTimeout(() => {
+          const values = exceptions.value
+            .split(/[,\n]+/)
+            .map((entry) => entry.trim())
+            .filter(Boolean);
+          send({ type: "settings.exceptions", values });
+        }, 450);
+      });
+    }
     const status = byId("settings-status");
     if (status) {
       status.textContent = "";
@@ -1341,7 +1371,7 @@
     if (aboutWebview && payload.webview2Version) {
       aboutWebview.textContent = payload.webview2Version;
     }
-    const aboutUpdate = byId("update-status");
+  const aboutUpdate = byId("update-status");
     if (aboutUpdate && payload.updateStatus) {
       aboutUpdate.textContent = payload.updateStatus;
     }
@@ -2191,6 +2221,13 @@
           theme: byId("setting-theme").value,
           language: byId("setting-language")?.value || "ru",
           startup: byId("setting-startup").value,
+          autoSuspendMinutes: Number(byId("setting-auto-suspend")?.value || 30),
+          windowControls: byId("setting-window-controls")?.value || "standard",
+          toolbarHidden: [
+            !byId("toolbar-translate")?.checked ? "translate" : null,
+            !byId("toolbar-downloads")?.checked ? "downloads" : null,
+            !byId("toolbar-theme")?.checked ? "theme" : null,
+          ].filter(Boolean),
           httpsFirst: byId("setting-https").checked,
           clearOnExit: byId("setting-clear-exit").checked,
           adblock: byId("setting-adblock").checked,
@@ -2600,6 +2637,19 @@
   if (paletteOverlay) paletteOverlay.addEventListener("pointerdown", (event) => {
     if (event.target === paletteOverlay) closePalette();
   });
+
+  const updateCheckButton = byId("update-check");
+  if (updateCheckButton) {
+    updateCheckButton.addEventListener("click", () => {
+      const statusNode = byId("update-status");
+      if (statusNode) statusNode.textContent = "Проверка…";
+      send({ type: "app.updateCheck" });
+    });
+  }
+  const updateDownloadButton = byId("update-download");
+  if (updateDownloadButton) {
+    updateDownloadButton.addEventListener("click", () => send({ type: "nav.go", url: "https://github.com/d1m40fficial/rustle/releases/latest" }));
+  }
 
   initParticleHero();
 

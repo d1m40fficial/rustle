@@ -811,7 +811,6 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                 "autoSuspendMinutes": state.settings.auto_suspend_minutes,
                 "toolbarHidden": state.settings.toolbar_hidden,
                 "windowControls": state.settings.window_controls,
-                "toolbarHidden": state.settings.toolbar_hidden,
             },
             "adblockStatus": state.adblock_info.to_json(),
             "blockedLog": state.blocked_log,
@@ -2867,6 +2866,27 @@ fn open_session_as(state: &Rc<RefCell<AppState>>) {
 }
 
 #[allow(dead_code)]
+fn version_parts(version: &str) -> Vec<u32> {
+    version
+        .trim_start_matches('v')
+        .split('.')
+        .map(|part| part.parse::<u32>().unwrap_or(0))
+        .collect()
+}
+
+fn version_is_newer(latest: &str, current: &str) -> bool {
+    let latest = version_parts(latest);
+    let current = version_parts(current);
+    for index in 0..latest.len().max(current.len()) {
+        let left = latest.get(index).copied().unwrap_or(0);
+        let right = current.get(index).copied().unwrap_or(0);
+        if left != right {
+            return left > right;
+        }
+    }
+    false
+}
+
 fn check_updates(state: &Rc<RefCell<AppState>>) {
     let proxy = state.borrow().proxy.clone();
     std::thread::spawn(move || {
@@ -2889,7 +2909,7 @@ fn check_updates(state: &Rc<RefCell<AppState>>) {
                             .to_owned();
                         if latest.is_empty() {
                             "Не удалось проверить обновления".to_owned()
-                        } else if latest != VERSION {
+                        } else if version_is_newer(&latest, VERSION) {
                             format!("Доступна новая версия {latest} (у вас {VERSION})")
                         } else {
                             format!("У вас последняя версия {VERSION}")
@@ -5319,6 +5339,25 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             find_in_page(state, text, forward);
         }
         Some("settings.export") => export_config(state),
+        Some("settings.exceptions") => {
+            if let Some(values) = message.get("values").and_then(|value| value.as_array()) {
+                let exceptions: Vec<String> = values
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .map(|value| value.trim().trim_start_matches('.').to_lowercase())
+                    .filter(|value| !value.is_empty())
+                    .collect();
+                {
+                    let mut state_ref = state.borrow_mut();
+                    state_ref.settings.adblock_exceptions = exceptions;
+                    if !state_ref.private {
+                        let _ = rustle_storage::save_settings(&state_ref.settings);
+                    }
+                }
+                push_ui_state(state);
+            }
+        }
+        Some("app.updateCheck") => check_updates(state),
         Some("sessions.refresh") => refresh_saved_sessions(state),
         Some("sessions.save") => {
             if let Some(name) = message.get("name").and_then(|value| value.as_str()) {
@@ -5929,6 +5968,11 @@ unsafe extern "system" {
     fn SetCapture(hwnd: isize) -> isize;
     fn GetCapture() -> isize;
     fn GetParent(hwnd: isize) -> isize;
+    fn GetWindowDC(hwnd: isize) -> isize;
+    fn ReleaseDC(hwnd: isize, hdc: isize) -> i32;
+    fn CreateSolidBrush(color: u32) -> isize;
+    fn FillRect(hdc: isize, rect: *const ResizeRect, brush: isize) -> i32;
+    fn DeleteObject(object: isize) -> i32;
 }
 
 #[cfg(target_os = "windows")]
@@ -6217,6 +6261,33 @@ unsafe extern "system" fn resize_subclass(
     const HTBOTTOMRIGHT: isize = 17;
     const BORDER: i32 = 10;
     const WM_NCCALCSIZE: u32 = 0x0083;
+    const WM_NCPAINT: u32 = 0x0085;
+
+    if msg == WM_NCPAINT {
+        unsafe {
+            let mut window = ResizeRect {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            GetWindowRect(hwnd, &mut window);
+            let hdc = GetWindowDC(hwnd);
+            if hdc != 0 {
+                let brush = CreateSolidBrush(0x00252525);
+                let top = ResizeRect {
+                    left: 0,
+                    top: 0,
+                    right: window.right - window.left,
+                    bottom: 8,
+                };
+                FillRect(hdc, &top, brush);
+                DeleteObject(brush);
+                ReleaseDC(hwnd, hdc);
+            }
+        }
+        return 0;
+    }
 
     if msg == WM_NCCALCSIZE {
         let border = 8i32;
@@ -6224,7 +6295,7 @@ unsafe extern "system" fn resize_subclass(
             if wparam != 0 {
                 let params = &mut *(lparam as *mut NcCalcSizeParams);
                 params.rgrc[0].left += border;
-                // top edge stays in the client area: no extra line above the toolbar
+                params.rgrc[0].top += 6;
                 params.rgrc[0].right -= border;
                 params.rgrc[0].bottom -= border;
             } else {
