@@ -1523,7 +1523,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             let sidebar_visible = sidebar_visible && !prompt_open && !switcher_open;
             let _ = sidebar.set_visible(sidebar_visible);
             if sidebar_visible {
-                let _ = sidebar.set_bounds(rect(0, 0, sidebar_width, height));
+                let _ = sidebar.set_bounds(rect(0, top, sidebar_width, height.saturating_sub(top)));
             }
         }
 

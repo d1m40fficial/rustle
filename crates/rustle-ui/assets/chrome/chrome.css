@@ -1923,3 +1923,51 @@ html.vertical-mode .switcher-overlay {
 .window-controls-standard .toolbar {
   padding-right: 146px;
 }
+
+/* subtle dark scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(170, 170, 170, 0.28) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(170, 170, 170, 0.28);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(190, 190, 190, 0.45);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.internal-page {
+  box-sizing: border-box;
+  overflow-y: scroll;
+  padding-bottom: 88px;
+}
+
+.settings__actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  padding: 14px 0;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}
+
+.blocked-row {
+  padding: 7px 9px;
+  color: var(--text);
+  font: 12px/1.35 var(--mono);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  background: var(--bg-elevated);
+}

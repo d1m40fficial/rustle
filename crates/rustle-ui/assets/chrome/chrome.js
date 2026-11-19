@@ -1482,7 +1482,7 @@
     const sideWidth = payload.vertical ? (payload.sidebarCollapsed ? 56 : configuredSidebar) : 0;
     document.documentElement.style.setProperty("--sidebar-width", sideWidth + "px");
     document.documentElement.style.setProperty("--chrome-offset", payload.vertical ? "44px" : "78px");
-    document.documentElement.style.setProperty("--toolbar-nav-left", Math.max(72, sideWidth) + "px");
+    document.documentElement.style.setProperty("--toolbar-nav-left", "72px");
     window.requestAnimationFrame(syncAddressOverlay);
     if (Array.isArray(payload.blockedLog)) {
       renderBlockedLog(payload.blockedLog);
