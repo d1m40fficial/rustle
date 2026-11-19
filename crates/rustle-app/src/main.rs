@@ -1719,7 +1719,6 @@ fn on_page_load(state: &Rc<RefCell<AppState>>, tab_id: TabId, event: PageLoadEve
             if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
                 tab.loading = true;
             }
-            show_loading_overlay(state, tab_id);
         }
         PageLoadEvent::Finished => {
             sync_tab_from_webview(state, tab_id);
@@ -7332,7 +7331,12 @@ fn main() -> wry::Result<()> {
                 move_tab_to_group(&state, tab, group);
             }
             Event::UserEvent(AppEvent::Vertical(enabled)) => {
-                state.borrow_mut().layout_anim = None;
+                {
+                    let mut state_ref = state.borrow_mut();
+                    state_ref.switcher_open = false;
+                    state_ref.prompt_open = false;
+                    state_ref.layout_anim = None;
+                }
                 let (from_top, from_side) = {
                     let state_ref = state.borrow();
                     let top = if state_ref.vertical {

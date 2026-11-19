@@ -306,8 +306,6 @@ pub fn spawn_loader(proxy: EventLoopProxy<AppEvent>, force: bool, allow_network:
 }
 
 const BUILTIN_CUSTOM: &[&str] = &[
-    "||ads.rutube.ru^",
-    "||ad.rutube.ru^",
     "||rutube.ru/api/advert^",
     "rutube.ru##.advert",
     "rutube.ru##[class*=\"advert\"]",
