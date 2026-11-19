@@ -115,7 +115,9 @@ const RUTUBE_SKIP_JS: &str = r#"(function(){
     var nodes = document.querySelectorAll("button,[role='button'],span,div");
     for (var i = 0; i < nodes.length; i++) {
       var text = (nodes[i].textContent || "").trim().toLowerCase();
-      if (text.indexOf("пропустить") !== -1 || text === "skip" || text.indexOf("skip ad") !== -1) {
+      if (text.length > 40) continue;
+      var isSkip = text === "пропустить" || text === "пропустить рекламу" || text === "skip" || text === "skip ad";
+      if (isSkip) {
         try { nodes[i].click(); } catch (error) {}
       }
     }
