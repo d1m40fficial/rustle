@@ -890,12 +890,16 @@
           button.append(dot, document.createTextNode(profile.name + (profile.pin ? " 🔒" : "")));
           button.addEventListener("click", () => {
             selectedProfile = profile.id;
-            const pin = byId("profile-pin");
-            if (pin) {
-              pin.value = "";
-              pin.focus();
+            if (!profile.pin) {
+              send({ type: "profile.select", id: profile.id, pin: "" });
+            } else {
+              const pin = byId("profile-pin");
+              if (pin) {
+                pin.value = "";
+                pin.focus();
+              }
+              renderProfiles();
             }
-            renderProfiles();
           });
           list.append(button);
         });
@@ -947,46 +951,60 @@
   };
 
   let historyPanelAt = 0;
-  const makeHistoryEntry = (item) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "history-entry";
-    const icon = document.createElement("span");
-    icon.className = "history-entry__icon";
-    const favicon = item.favicon || item.icon || "";
-    if (favicon) {
-      const img = document.createElement("img");
-      img.src = favicon;
-      img.alt = "";
-      img.loading = "lazy";
-      img.addEventListener("error", () => img.remove());
-      icon.append(img);
-    } else {
-      icon.textContent = String(item.title || item.url || "?").trim().slice(0, 1).toUpperCase();
+  let historyPopoverTimer = 0;
+  const hideHistoryPopover = () => {
+    window.clearTimeout(historyPopoverTimer);
+    const popover = byId("history-popover");
+    if (popover) {
+      popover.classList.remove("is-visible");
+      window.setTimeout(() => {
+        if (!popover.classList.contains("is-visible")) popover.hidden = true;
+      }, 160);
     }
-    const body = document.createElement("span");
-    body.className = "history-entry__body";
+  };
+  const showHistoryPopover = (stick, item) => {
+    window.clearTimeout(historyPopoverTimer);
+    const popover = byId("history-popover");
+    if (!popover) return;
+    popover.replaceChildren();
     const title = document.createElement("strong");
     title.textContent = item.title || item.url || "Без названия";
     const url = document.createElement("small");
     url.textContent = item.url || "";
-    body.append(title, url);
-    button.append(icon, body);
-    button.addEventListener("click", () => {
-      if (item.url) send({ type: "tabs.newUrl", url: item.url });
-    });
-    return button;
+    popover.append(title, url);
+    popover.hidden = false;
+    popover.classList.add("is-visible");
+    const rect = stick.getBoundingClientRect();
+    const box = popover.getBoundingClientRect();
+    let left = rect.left - box.width - 10;
+    if (left < 8) left = 8;
+    let top = rect.top + rect.height / 2 - box.height / 2;
+    top = Math.max(8, Math.min(top, window.innerHeight - box.height - 8));
+    popover.style.left = left + "px";
+    popover.style.top = top + "px";
   };
-  const renderHistorySection = (id, items) => {
-    const list = byId(id);
-    if (!list) return 0;
-    list.replaceChildren();
+  const renderStickGroup = (id, items) => {
+    const group = byId(id);
+    if (!group) return 0;
+    group.replaceChildren();
     const seen = new Set();
     let count = 0;
     items.forEach((item) => {
       if (!item || !item.url || seen.has(item.url)) return;
       seen.add(item.url);
-      list.append(makeHistoryEntry(item));
+      const stick = document.createElement("button");
+      stick.type = "button";
+      stick.className = "history-stick";
+      stick.setAttribute("aria-label", item.title || item.url);
+      stick.addEventListener("mouseenter", () => showHistoryPopover(stick, item));
+      stick.addEventListener("mouseleave", () => {
+        window.clearTimeout(historyPopoverTimer);
+        historyPopoverTimer = window.setTimeout(hideHistoryPopover, 140);
+      });
+      stick.addEventListener("focus", () => showHistoryPopover(stick, item));
+      stick.addEventListener("blur", hideHistoryPopover);
+      stick.addEventListener("click", () => send({ type: "tabs.newUrl", url: item.url }));
+      group.append(stick);
       count += 1;
     });
     return count;
@@ -994,8 +1012,10 @@
   const renderHistoryPanel = (historyItems, openTabs) => {
     const panel = byId("newtab-history");
     if (!panel) return;
-    const requests = renderHistorySection("newtab-history-requests", historyItems.slice(0, 10));
-    const tabs = renderHistorySection("newtab-history-tabs", openTabs.slice(0, 10));
+    const requests = renderStickGroup("newtab-history-requests", historyItems.slice(0, 12));
+    const tabs = renderStickGroup("newtab-history-tabs", openTabs.slice(0, 12));
+    const divider = panel.querySelector(".stick-divider");
+    if (divider) divider.hidden = !(requests && tabs);
     if (!requests && !tabs) {
       panel.hidden = true;
       panel.classList.remove("is-visible");
@@ -1018,6 +1038,11 @@
       console.warn(error);
     }
   };
+  const popover = byId("history-popover");
+  if (popover) {
+    popover.addEventListener("mouseenter", () => window.clearTimeout(historyPopoverTimer));
+    popover.addEventListener("mouseleave", hideHistoryPopover);
+  }
 
   const renderDownloads = (items = current.downloads || []) => {
     const list = byId("downloads-list");
@@ -1890,7 +1915,7 @@
       canvas.width = width;
       canvas.height = height;
       const light = document.documentElement.classList.contains("light");
-      const color = light ? "rgba(92, 64, 30, 0.95)" : "rgba(246, 226, 177, 0.96)";
+      const color = light ? "rgba(0, 0, 0, 0.88)" : "rgba(255, 255, 255, 0.96)";
       const logoRect = logo.getBoundingClientRect();
       const brandRect = brand.getBoundingClientRect();
       const step = intensity >= 150 ? 1 : intensity <= 60 ? 3 : 2;

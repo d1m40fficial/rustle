@@ -103,7 +103,7 @@
         <div class="newtab__brand">Rustle</div>
         <canvas class="newtab__particles" id="newtab-particles"></canvas>
       </div>
-      <p class="newtab__tagline">Минималистичный браузер. 0.41.4.</p>
+      <p class="newtab__tagline">Минималистичный браузер. 0.41.5.</p>
 
       <form class="newtab__search" id="newtab-search" role="search">
         <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
@@ -116,15 +116,15 @@
         <button class="newtab__add newtab__edit" id="newtab-edit" type="button">✎ Редактировать плитки</button>
       </div>
 
-    <aside class="history-sidebar" id="newtab-history" aria-label="История и вкладки">
-      <div class="history-sidebar__scroll">
-        <p class="history-sidebar__title">История запросов</p>
-        <div class="history-sidebar__list" id="newtab-history-requests"></div>
-        <p class="history-sidebar__title">Последние вкладки</p>
-        <div class="history-sidebar__list" id="newtab-history-tabs"></div>
+    <aside class="history-sticks" id="newtab-history" aria-label="История и вкладки">
+      <div class="history-sticks__scroll">
+        <div class="stick-group" id="newtab-history-requests"></div>
+        <div class="stick-divider"></div>
+        <div class="stick-group" id="newtab-history-tabs"></div>
       </div>
     </aside>
-      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.41.4</span></p>
+    <div class="history-popover" id="history-popover" role="tooltip"></div>
+      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.41.5</span></p>
     </div>
   </section>
 

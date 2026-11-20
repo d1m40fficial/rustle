@@ -1096,6 +1096,7 @@ mod native_menu {
     pub enum Kind {
         App,
         Quick,
+        Zoom,
         Tab(TabId),
         Group(u64),
     }
@@ -1178,6 +1179,12 @@ mod native_menu {
         label.to_owned()
     }
 
+    fn zoom_items(_state: &AppState, items: &mut Vec<Entry>) {
+        push(items, "app.zoomOut", "− Уменьшить");
+        push(items, "app.zoomReset", "Сбросить");
+        push(items, "app.zoomIn", "+ Увеличить");
+    }
+
     fn quick_items(state: &AppState, items: &mut Vec<Entry>) {
         push(items, "app.settings", "Настройки");
         separator(items);
@@ -1256,6 +1263,7 @@ mod native_menu {
             match kind {
                 Kind::App => app_items(&state, &mut entries),
                 Kind::Quick => quick_items(&state, &mut entries),
+                Kind::Zoom => zoom_items(&state, &mut entries),
                 Kind::Tab(id) => {
                     if let Some(tab) = state.tab(id) {
                         if tab.pinned {
@@ -1460,9 +1468,26 @@ mod native_menu {
                     state.borrow_mut().settings = settings;
                     push_ui_state(state);
                 }
+                "app.zoomMenu" => {
+                    show(state, Kind::Zoom, Origin::Chrome, x, y);
+                }
                 "app.zoomIn" => zoom_active(state, 0.1),
                 "app.zoomOut" => zoom_active(state, -0.1),
                 "app.zoomReset" => apply_zoom(state, 1.0),
+                "app.language" => {
+                    let language = if state.borrow().settings.language == "ru" {
+                        "en"
+                    } else {
+                        "ru"
+                    };
+                    let mut settings = state.borrow().settings.clone();
+                    settings.language = language.to_owned();
+                    if !state.borrow().private {
+                        let _ = rustle_storage::save_settings(&settings);
+                    }
+                    state.borrow_mut().settings = settings;
+                    push_ui_state(state);
+                }
                 "app.language.ru" | "app.language.en" => {
                     let language = if action.ends_with("en") { "en" } else { "ru" };
                     let mut settings = state.borrow().settings.clone();
@@ -1506,6 +1531,7 @@ mod native_menu {
     pub enum Kind {
         App,
         Quick,
+        Zoom,
         Tab(TabId),
         Group(u64),
     }
@@ -3087,11 +3113,7 @@ fn select_profile(state: &Rc<RefCell<AppState>>, id: u64, pin: &str) {
         push_ui_state(state);
         return;
     };
-    let valid = if selected.pin.is_empty() {
-        pin.len() == 4 && pin.chars().all(|ch| ch.is_ascii_digit())
-    } else {
-        selected.pin == pin
-    };
+    let valid = selected.pin.is_empty() || selected.pin == pin;
     if !valid {
         state.borrow_mut().profile_error = if selected.pin.is_empty() {
             "Задайте PIN из 4 цифр".to_owned()
@@ -3100,20 +3122,6 @@ fn select_profile(state: &Rc<RefCell<AppState>>, id: u64, pin: &str) {
         };
         push_ui_state(state);
         return;
-    }
-    if selected.pin.is_empty() {
-        {
-            let mut state_ref = state.borrow_mut();
-            if let Some(profile) = state_ref
-                .profiles
-                .profiles
-                .iter_mut()
-                .find(|profile| profile.id == id)
-            {
-                profile.pin = pin.to_owned();
-            }
-        }
-        save_profiles(&state.borrow().profiles);
     }
     let old_webviews: Vec<WebView> = {
         let mut state_ref = state.borrow_mut();
@@ -6058,6 +6066,7 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                     .and_then(|value| value.as_u64())
                     .map(native_menu::Kind::Group),
                 Some("quick") => Some(native_menu::Kind::Quick),
+                Some("zoom") => Some(native_menu::Kind::Zoom),
                 _ => Some(native_menu::Kind::App),
             };
             if let Some(kind) = kind {
