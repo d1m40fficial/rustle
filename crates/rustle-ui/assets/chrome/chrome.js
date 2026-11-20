@@ -2848,7 +2848,11 @@
 
   const topbarMenu = byId("topbar-menu");
   if (topbarMenu) {
-    topbarMenu.addEventListener("click", () => send({ type: "nav.go", url: "rustle://settings" }));
+    topbarMenu.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const rect = topbarMenu.getBoundingClientRect();
+      send({ type: "ui.menu", kind: "quick", origin: "chrome", x: rect.left, y: rect.bottom });
+    });
   }
   const compactAddress = byId("address");
   if (compactAddress) {

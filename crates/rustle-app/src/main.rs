@@ -1094,6 +1094,7 @@ mod native_menu {
 
     pub enum Kind {
         App,
+        Quick,
         Tab(TabId),
         Group(u64),
     }
@@ -1176,6 +1177,35 @@ mod native_menu {
         label.to_owned()
     }
 
+    fn quick_items(state: &AppState, items: &mut Vec<Entry>) {
+        push(items, "app.settings", "Настройки");
+        separator(items);
+        push(items, "app.theme", "Сменить тему");
+        push(items, "app.zoomOut", "Уменьшить масштаб");
+        push(items, "app.zoomReset", "Сбросить масштаб");
+        push(items, "app.zoomIn", "Увеличить масштаб");
+        separator(items);
+        push_checked(
+            items,
+            "app.language.ru",
+            "Язык: Русский",
+            state.settings.language == "ru",
+        );
+        push_checked(
+            items,
+            "app.language.en",
+            "Язык: English",
+            state.settings.language == "en",
+        );
+        separator(items);
+        push_checked(
+            items,
+            "app.vertical",
+            "Вертикальные вкладки",
+            state.vertical,
+        );
+    }
+
     fn app_items(state: &AppState, items: &mut Vec<Entry>) {
         push(items, "app.newtab", "Новая вкладка");
         push(items, "app.reopen", "Вернуть закрытую вкладку");
@@ -1224,6 +1254,7 @@ mod native_menu {
             let mut entries = Vec::new();
             match kind {
                 Kind::App => app_items(&state, &mut entries),
+                Kind::Quick => quick_items(&state, &mut entries),
                 Kind::Tab(id) => {
                     if let Some(tab) = state.tab(id) {
                         if tab.pinned {
@@ -1426,6 +1457,7 @@ mod native_menu {
 
     pub enum Kind {
         App,
+        Quick,
         Tab(TabId),
         Group(u64),
     }
@@ -1468,6 +1500,51 @@ fn start_layout_animation(
             let _ = proxy.send_event(AppEvent::LayoutTick);
         }
     });
+}
+
+#[cfg(target_os = "windows")]
+#[link(name = "gdi32")]
+unsafe extern "system" {
+    fn CreateRoundRectRgn(
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+        width: i32,
+        height: i32,
+    ) -> isize;
+}
+
+#[cfg(target_os = "windows")]
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn SetWindowRgn(hwnd: isize, region: isize, redraw: i32) -> i32;
+    fn IsZoomed(hwnd: isize) -> i32;
+}
+
+#[cfg(target_os = "windows")]
+fn apply_rounded_window_region(window: &Window) {
+    let hwnd = window.hwnd();
+    let mut rect = ResizeRect {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    unsafe {
+        if IsZoomed(hwnd) != 0 {
+            SetWindowRgn(hwnd, 0, 1);
+            return;
+        }
+        GetWindowRect(hwnd, &mut rect);
+        let width = (rect.right - rect.left).max(1);
+        let height = (rect.bottom - rect.top).max(1);
+        let radius = 22;
+        let region = CreateRoundRectRgn(0, 0, width + 1, height + 1, radius, radius);
+        if region != 0 {
+            SetWindowRgn(hwnd, region, 1);
+        }
+    }
 }
 
 fn apply_layout(state: &Rc<RefCell<AppState>>) {
@@ -1598,6 +1675,11 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
                 }
             }
         }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let window = state.borrow().window.clone();
+        apply_rounded_window_region(&window);
     }
     if animation_finished {
         state.borrow_mut().layout_anim = None;
@@ -5671,6 +5753,8 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             start_window_drag(&window);
         }
         Some("zoom.reset") => apply_zoom(state, 1.0),
+        Some("zoom.in") => zoom_active(state, 0.1),
+        Some("zoom.out") => zoom_active(state, -0.1),
         Some("zoom.wheel") => {
             let delta = message
                 .get("delta")
@@ -5881,6 +5965,7 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                     .get("groupId")
                     .and_then(|value| value.as_u64())
                     .map(native_menu::Kind::Group),
+                Some("quick") => Some(native_menu::Kind::Quick),
                 _ => Some(native_menu::Kind::App),
             };
             if let Some(kind) = kind {
@@ -7076,8 +7161,10 @@ fn main() -> wry::Result<()> {
     {
         let border_color = 34u32;
         let none_color = 0xFFFF_FFFEu32;
+        let round = 2u32;
         unsafe {
             let _ = DwmSetWindowAttribute(window.hwnd(), border_color, &none_color, 4);
+            let _ = DwmSetWindowAttribute(window.hwnd(), 33, &round, 4);
         }
     }
     #[cfg(target_os = "windows")]
