@@ -2430,3 +2430,29 @@ body.switcher-open .switcher-overlay { display: grid !important; }
 .history-stick:hover, .history-stick:focus-visible {
   width: calc(15px + (25px * var(--width-scale, 1)));
 }
+
+.history-sticks {
+  height: 60vh;
+  max-height: 60vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.history-sticks__scroll {
+  height: auto;
+  max-height: 100%;
+  overflow-y: hidden;
+  justify-content: flex-start;
+}
+.history-sticks__scroll.is-scrollable { overflow-y: auto; }
+.history-stick {
+  flex-shrink: 0;
+  width: calc(10px + (20px * var(--width-scale, 1)));
+  transition: background-color .18s ease, transform .18s ease;
+}
+.history-stick:hover, .history-stick:focus-visible {
+  width: calc(10px + (20px * var(--width-scale, 1))) !important;
+  background: var(--text);
+  transform: scaleX(1.12);
+  transform-origin: right center;
+}

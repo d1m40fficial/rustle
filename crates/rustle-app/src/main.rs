@@ -1062,6 +1062,22 @@ mod native_menu {
         y: i32,
     }
 
+    #[repr(C)]
+    #[derive(Default)]
+    struct MenuRect {
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct MenuPoint {
+        x: i32,
+        y: i32,
+    }
+
     #[link(name = "user32")]
     unsafe extern "system" {
         fn ClientToScreen(hwnd: isize, point: *mut Point) -> i32;
@@ -1077,6 +1093,10 @@ mod native_menu {
             hwnd: isize,
             rect: *const core::ffi::c_void,
         ) -> i32;
+        fn GetMenuItemCount(menu: isize) -> i32;
+        fn GetMenuItemID(menu: isize, position: i32) -> u32;
+        fn GetMenuItemRect(hwnd: isize, menu: isize, position: u32, rect: *mut MenuRect) -> i32;
+        fn GetCursorPos(point: *mut MenuPoint) -> i32;
         fn SetForegroundWindow(hwnd: isize) -> i32;
     }
 
@@ -1198,7 +1218,7 @@ mod native_menu {
             },
         );
         let zoom = (state.active_tab().map(|tab| tab.zoom).unwrap_or(1.0) * 100.0).round() as i32;
-        push(items, "app.zoomMenu", &format!("Масштаб: {zoom}%  (− / +)"));
+        push(items, "app.zoomClick", &format!("−   Масштаб: {zoom}%   +"));
         push(
             items,
             "app.language",
@@ -1433,6 +1453,20 @@ mod native_menu {
                 std::ptr::null(),
             )
         };
+        let mut menu_rect = MenuRect::default();
+        let mut cursor = MenuPoint::default();
+        if command > 0 {
+            unsafe {
+                let count = GetMenuItemCount(menu);
+                for position in 0..count {
+                    if GetMenuItemID(menu, position) == command as u32 {
+                        let _ = GetMenuItemRect(owner, menu, position as u32, &mut menu_rect);
+                        break;
+                    }
+                }
+                let _ = GetCursorPos(&mut cursor);
+            }
+        }
         unsafe {
             DestroyMenu(menu);
         }
@@ -1471,8 +1505,15 @@ mod native_menu {
                     state.borrow_mut().settings = settings;
                     push_ui_state(state);
                 }
-                "app.zoomMenu" => {
-                    show(state, Kind::Zoom, Origin::Chrome, x, y);
+                "app.zoomMenu" | "app.zoomClick" => {
+                    let width = (menu_rect.right - menu_rect.left).max(1);
+                    if cursor.x < menu_rect.left + width / 3 {
+                        zoom_active(state, -0.1);
+                    } else if cursor.x > menu_rect.right - width / 3 {
+                        zoom_active(state, 0.1);
+                    } else {
+                        apply_zoom(state, 1.0);
+                    }
                 }
                 "app.zoomIn" => zoom_active(state, 0.1),
                 "app.zoomOut" => zoom_active(state, -0.1),
@@ -1835,6 +1876,8 @@ fn on_navigation(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: String) {
     if collapse {
         apply_layout(state);
         focus_active_content(state);
+    } else {
+        apply_layout(state);
     }
     push_ui_state(state);
     save_session_due(state);
@@ -3148,6 +3191,14 @@ fn select_profile(state: &Rc<RefCell<AppState>>, id: u64, pin: &str) {
     };
     drop(old_webviews);
     if state.borrow().tabs.is_empty() {
+        new_tab(state);
+        return;
+    }
+    if state
+        .borrow()
+        .active_tab()
+        .is_some_and(|tab| tab.url.starts_with("rustle://"))
+    {
         new_tab(state);
         return;
     }
