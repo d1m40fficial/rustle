@@ -940,33 +940,46 @@
   };
 
   let historyPanelAt = 0;
-  const loadHistoryPanel = async () => {
+  const renderHistoryItems = (items) => {
     const panel = byId("newtab-history");
     const list = byId("newtab-history-list");
     if (!panel || !list) return;
+    list.replaceChildren();
+    if (!items.length) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    items.slice(0, 14).forEach((item) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "history-chip";
+      const title = document.createElement("strong");
+      title.textContent = item.title || item.url || "Без названия";
+      const url = document.createElement("small");
+      url.textContent = item.url || "";
+      button.append(title, url);
+      button.addEventListener("click", () => send({ type: "tabs.newUrl", url: item.url }));
+      list.append(button);
+    });
+  };
+  const loadHistoryPanel = async () => {
     if (Date.now() - historyPanelAt < 8000) return;
     historyPanelAt = Date.now();
+    const openTabs = (current.tabs || [])
+      .filter((tab) => tab.url)
+      .map((tab) => ({ title: tab.title, url: tab.url }));
+    renderHistoryItems(openTabs);
     try {
       const data = await request("history.query", { query: "", limit: 12 });
-      const items = (data && data.items) || [];
-      list.replaceChildren();
-      if (!items.length) {
-        panel.hidden = true;
-        return;
-      }
-      panel.hidden = false;
-      items.forEach((item) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "history-chip";
-        const title = document.createElement("strong");
-        title.textContent = item.title || item.url || "Без названия";
-        const url = document.createElement("small");
-        url.textContent = item.url || "";
-        button.append(title, url);
-        button.addEventListener("click", () => send({ type: "tabs.newUrl", url: item.url }));
-        list.append(button);
+      const historyItems = (data && data.items) || [];
+      const seen = new Set();
+      const items = [...openTabs, ...historyItems].filter((item) => {
+        if (!item.url || seen.has(item.url)) return false;
+        seen.add(item.url);
+        return true;
       });
+      renderHistoryItems(items);
     } catch (error) {
       console.warn(error);
     }
@@ -2847,6 +2860,44 @@
     });
   }
 
+  const settingsSectionMap = {
+    "Поисковик": "setting-engine",
+    "Тема": "setting-theme",
+    "Язык интерфейса": "setting-language",
+    "Частицы на главной": "setting-particles",
+    "При запуске": "setting-startup",
+    "HTTPS-first": "setting-https",
+    "Ширина боковой панели": "setting-sidebar-width",
+    "Контейнеры cookie": "setting-containers",
+    "Контейнер новых вкладок": "setting-default-container",
+    "Блокировка рекламы": "setting-adblock",
+    "Исключения Adblock": "setting-adblock-exceptions",
+    "Свои правила Adblock": "setting-adblock-rules",
+    "Журнал блокировок": "setting-blocked-log",
+    "Профили": "setting-profiles",
+    "Верхняя панель": "setting-topbar-style",
+    "Кнопки окна": "setting-window-controls",
+    "Кнопки панели": "setting-toolbar",
+    "Автосон вкладок": "setting-auto-suspend",
+    "Библиотека сессий": "setting-sessions",
+  };
+  const initSettingsNav = () => {
+    document.querySelectorAll("#settings-form .settings__row").forEach((row) => {
+      const strong = row.querySelector("strong");
+      const id = strong && settingsSectionMap[strong.textContent.trim()];
+      if (id) row.id = id;
+    });
+    const actions = document.querySelector("#settings-form .settings__actions");
+    if (actions) actions.id = "setting-actions";
+    document.querySelectorAll("[data-setting-target]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const target = document.getElementById(button.dataset.settingTarget);
+        if (target) target.scrollIntoView({ block: "start", behavior: "smooth" });
+      });
+    });
+  };
+
+  initSettingsNav();
   initParticleHero();
 
     document.querySelectorAll(".resize-edge").forEach((node) => {

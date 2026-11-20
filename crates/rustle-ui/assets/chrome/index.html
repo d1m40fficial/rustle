@@ -103,7 +103,7 @@
         <div class="newtab__brand">Rustle</div>
         <canvas class="newtab__particles" id="newtab-particles"></canvas>
       </div>
-      <p class="newtab__tagline">Минималистичный браузер. 0.40.0.</p>
+      <p class="newtab__tagline">Минималистичный браузер. 0.41.0.</p>
 
       <form class="newtab__search" id="newtab-search" role="search">
         <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
@@ -123,7 +123,7 @@
       </div>
       <div class="newtab-history__list" id="newtab-history-list"></div>
     </aside>
-      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.40.0</span></p>
+      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.41.0</span></p>
     </div>
   </section>
 
@@ -179,7 +179,31 @@
       </nav>
     </header>
 
-    <form id="settings-form" class="settings">
+    <div class="settings-layout">
+      <nav class="settings-nav" aria-label="Разделы настроек">
+        <p>Разделы</p>
+        <button type="button" data-setting-target="setting-engine">Поисковик</button>
+        <button type="button" data-setting-target="setting-theme">Тема</button>
+        <button type="button" data-setting-target="setting-language">Язык</button>
+        <button type="button" data-setting-target="setting-particles">Частицы</button>
+        <button type="button" data-setting-target="setting-startup">При запуске</button>
+        <button type="button" data-setting-target="setting-https">HTTPS</button>
+        <button type="button" data-setting-target="setting-sidebar-width">Боковая панель</button>
+        <button type="button" data-setting-target="setting-containers">Контейнеры</button>
+        <button type="button" data-setting-target="setting-default-container">Контейнер вкладок</button>
+        <button type="button" data-setting-target="setting-adblock">Adblock</button>
+        <button type="button" data-setting-target="setting-adblock-exceptions">Исключения</button>
+        <button type="button" data-setting-target="setting-adblock-rules">Свои правила</button>
+        <button type="button" data-setting-target="setting-blocked-log">Журнал блокировок</button>
+        <button type="button" data-setting-target="setting-profiles">Профили</button>
+        <button type="button" data-setting-target="setting-topbar-style">Верхняя панель</button>
+        <button type="button" data-setting-target="setting-window-controls">Кнопки окна</button>
+        <button type="button" data-setting-target="setting-toolbar">Кнопки панели</button>
+        <button type="button" data-setting-target="setting-auto-suspend">Автосон</button>
+        <button type="button" data-setting-target="setting-sessions">Сессии</button>
+        <button type="button" data-setting-target="setting-actions">Сохранить</button>
+      </nav>
+      <form id="settings-form" class="settings">
       <label class="settings__row">
         <span>
           <strong>Поисковик</strong>
