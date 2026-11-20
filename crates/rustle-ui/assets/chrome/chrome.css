@@ -2414,3 +2414,19 @@ body.switcher-open .switcher-overlay { display: grid !important; }
   width: 32px;
   background: var(--text);
 }
+
+.history-sticks { max-height: 60vh; }
+.history-sticks__scroll {
+  max-height: 60vh;
+  overflow-y: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.history-sticks__scroll.is-scrollable { overflow-y: auto; }
+.history-stick {
+  width: calc(10px + (20px * var(--width-scale, 1)));
+}
+.history-stick:hover, .history-stick:focus-visible {
+  width: calc(15px + (25px * var(--width-scale, 1)));
+}

@@ -992,7 +992,7 @@
     popover.style.left = left + "px";
     popover.style.top = top + "px";
   };
-  const renderStickGroup = (id, items) => {
+  const renderStickGroup = (id, items, startIndex = 0, total = 1) => {
     const group = byId(id);
     if (!group) return 0;
     group.replaceChildren();
@@ -1013,6 +1013,8 @@
       stick.addEventListener("focus", () => showHistoryPopover(stick, item));
       stick.addEventListener("blur", hideHistoryPopover);
       stick.addEventListener("click", () => send({ type: "tabs.newUrl", url: item.url }));
+      const scale = total > 1 ? (startIndex + count) / (total - 1) : 1;
+      stick.style.setProperty("--width-scale", scale.toFixed(3));
       group.append(stick);
       count += 1;
     });
@@ -1021,8 +1023,11 @@
   const renderHistoryPanel = (historyItems, openTabs) => {
     const panel = byId("newtab-history");
     if (!panel) return;
-    const requests = renderStickGroup("newtab-history-requests", historyItems.slice(0, 12));
-    const tabs = renderStickGroup("newtab-history-tabs", openTabs.slice(0, 12));
+    const requestItems = historyItems.slice(0, 12).reverse();
+    const tabItems = openTabs.slice(0, 12);
+    const total = requestItems.length + tabItems.length;
+    const requests = renderStickGroup("newtab-history-requests", requestItems, 0, total);
+    const tabs = renderStickGroup("newtab-history-tabs", tabItems, requestItems.length, total);
     const divider = panel.querySelector(".stick-divider");
     if (divider) divider.hidden = !(requests && tabs);
     if (!requests && !tabs) {
@@ -1047,6 +1052,12 @@
       console.warn(error);
     }
   };
+  const sticksPanel = byId("newtab-history");
+  const sticksScroll = sticksPanel ? sticksPanel.querySelector(".history-sticks__scroll") : null;
+  if (sticksPanel && sticksScroll) {
+    sticksPanel.addEventListener("mouseenter", () => sticksScroll.classList.add("is-scrollable"));
+    sticksPanel.addEventListener("mouseleave", () => sticksScroll.classList.remove("is-scrollable"));
+  }
   const popover = byId("history-popover");
   if (popover) {
     popover.addEventListener("mouseenter", () => window.clearTimeout(historyPopoverTimer));
@@ -2475,6 +2486,19 @@
     if (engineSelect) {
       engineSelect.addEventListener("change", () => {
         send({ type: "settings.save", searchEngine: engineSelect.value });
+      });
+    }
+
+    const themeSelect = byId("setting-theme");
+    if (themeSelect) {
+      themeSelect.addEventListener("change", () => {
+        send({ type: "settings.save", theme: themeSelect.value });
+      });
+    }
+    const languageSelect = byId("setting-language");
+    if (languageSelect) {
+      languageSelect.addEventListener("change", () => {
+        send({ type: "settings.save", language: languageSelect.value });
       });
     }
 

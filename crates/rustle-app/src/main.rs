@@ -1188,22 +1188,25 @@ mod native_menu {
     fn quick_items(state: &AppState, items: &mut Vec<Entry>) {
         push(items, "app.settings", "Настройки");
         separator(items);
-        push(items, "app.theme", "Сменить тему");
-        push(items, "app.zoomOut", "Уменьшить масштаб");
-        push(items, "app.zoomReset", "Сбросить масштаб");
-        push(items, "app.zoomIn", "Увеличить масштаб");
-        separator(items);
-        push_checked(
+        push(
             items,
-            "app.language.ru",
-            "Язык: Русский",
-            state.settings.language == "ru",
+            "app.theme",
+            if state.settings.theme == "light" {
+                "Тема: Светлая"
+            } else {
+                "Тема: Тёмная"
+            },
         );
-        push_checked(
+        let zoom = (state.active_tab().map(|tab| tab.zoom).unwrap_or(1.0) * 100.0).round() as i32;
+        push(items, "app.zoomMenu", &format!("Масштаб: {zoom}%  (− / +)"));
+        push(
             items,
-            "app.language.en",
-            "Язык: English",
-            state.settings.language == "en",
+            "app.language",
+            if state.settings.language == "ru" {
+                "Язык: Русский"
+            } else {
+                "Язык: English"
+            },
         );
         separator(items);
         push_checked(
