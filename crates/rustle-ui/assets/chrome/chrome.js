@@ -947,46 +947,73 @@
   };
 
   let historyPanelAt = 0;
-  const renderHistoryItems = (items) => {
-    const panel = byId("newtab-history");
-    const list = byId("newtab-history-list");
-    if (!panel || !list) return;
+  const makeHistoryEntry = (item) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "history-entry";
+    const icon = document.createElement("span");
+    icon.className = "history-entry__icon";
+    const favicon = item.favicon || item.icon || "";
+    if (favicon) {
+      const img = document.createElement("img");
+      img.src = favicon;
+      img.alt = "";
+      img.loading = "lazy";
+      img.addEventListener("error", () => img.remove());
+      icon.append(img);
+    } else {
+      icon.textContent = String(item.title || item.url || "?").trim().slice(0, 1).toUpperCase();
+    }
+    const body = document.createElement("span");
+    body.className = "history-entry__body";
+    const title = document.createElement("strong");
+    title.textContent = item.title || item.url || "Без названия";
+    const url = document.createElement("small");
+    url.textContent = item.url || "";
+    body.append(title, url);
+    button.append(icon, body);
+    button.addEventListener("click", () => {
+      if (item.url) send({ type: "tabs.newUrl", url: item.url });
+    });
+    return button;
+  };
+  const renderHistorySection = (id, items) => {
+    const list = byId(id);
+    if (!list) return 0;
     list.replaceChildren();
-    if (!items.length) {
+    const seen = new Set();
+    let count = 0;
+    items.forEach((item) => {
+      if (!item || !item.url || seen.has(item.url)) return;
+      seen.add(item.url);
+      list.append(makeHistoryEntry(item));
+      count += 1;
+    });
+    return count;
+  };
+  const renderHistoryPanel = (historyItems, openTabs) => {
+    const panel = byId("newtab-history");
+    if (!panel) return;
+    const requests = renderHistorySection("newtab-history-requests", historyItems.slice(0, 10));
+    const tabs = renderHistorySection("newtab-history-tabs", openTabs.slice(0, 10));
+    if (!requests && !tabs) {
       panel.hidden = true;
+      panel.classList.remove("is-visible");
       return;
     }
     panel.hidden = false;
-    items.slice(0, 14).forEach((item) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "history-chip";
-      const title = document.createElement("strong");
-      title.textContent = item.title || item.url || "Без названия";
-      const url = document.createElement("small");
-      url.textContent = item.url || "";
-      button.append(title, url);
-      button.addEventListener("click", () => send({ type: "tabs.newUrl", url: item.url }));
-      list.append(button);
-    });
+    panel.classList.add("is-visible");
   };
   const loadHistoryPanel = async () => {
     if (Date.now() - historyPanelAt < 8000) return;
     historyPanelAt = Date.now();
     const openTabs = (current.tabs || [])
-      .filter((tab) => tab.url)
-      .map((tab) => ({ title: tab.title, url: tab.url }));
-    renderHistoryItems(openTabs);
+      .filter((tab) => tab.title || tab.url)
+      .map((tab) => ({ title: tab.title, url: tab.url || "rustle://newtab", favicon: tab.favicon }));
+    renderHistoryPanel([], openTabs);
     try {
       const data = await request("history.query", { query: "", limit: 12 });
-      const historyItems = (data && data.items) || [];
-      const seen = new Set();
-      const items = [...openTabs, ...historyItems].filter((item) => {
-        if (!item.url || seen.has(item.url)) return false;
-        seen.add(item.url);
-        return true;
-      });
-      renderHistoryItems(items);
+      renderHistoryPanel((data && data.items) || [], openTabs);
     } catch (error) {
       console.warn(error);
     }
@@ -1566,6 +1593,10 @@
     } else if (payload.switcherOpen === false) {
       hideSwitcher();
     }
+    if (payload.theme && window.__rustleTheme !== payload.theme) {
+      window.__rustleTheme = payload.theme;
+      window.__rustleParticles?.refresh?.();
+    }
     const themeToggle = byId("theme-toggle");
     if (themeToggle) {
       const light = payload.theme === "light";
@@ -1858,7 +1889,8 @@
       const height = Math.round(rect.height);
       canvas.width = width;
       canvas.height = height;
-      const color = getComputedStyle(brand).color;
+      const light = document.documentElement.classList.contains("light");
+      const color = light ? "rgba(92, 64, 30, 0.95)" : "rgba(246, 226, 177, 0.96)";
       const logoRect = logo.getBoundingClientRect();
       const brandRect = brand.getBoundingClientRect();
       const step = intensity >= 150 ? 1 : intensity <= 60 ? 3 : 2;
@@ -2005,7 +2037,7 @@
         }
       }, 180);
     });
-    window.__rustleParticles = { start, stop, configure };
+    window.__rustleParticles = { start, stop, configure, refresh: () => { stop(); window.setTimeout(start, 30); } };
     window.setTimeout(start, 200);
   };
 
