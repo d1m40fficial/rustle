@@ -298,7 +298,7 @@
     const nodes = [...container.children];
     let previousTab = false;
     for (const node of nodes) {
-      if (tabLike(node) && previousTab) {
+      if ((tabLike(node) || node.id === "new-tab") && previousTab) {
         const divider = document.createElement("span");
         divider.className = "tabs__divider tabs__divider--short";
         container.insertBefore(divider, node);
@@ -1639,7 +1639,7 @@
     const sideWidth = payload.vertical ? (payload.sidebarCollapsed ? 56 : configuredSidebar) : 0;
     document.documentElement.style.setProperty("--sidebar-width", sideWidth + "px");
     document.documentElement.style.setProperty("--chrome-offset", payload.vertical ? "44px" : "78px");
-    document.documentElement.style.setProperty("--toolbar-nav-left", "72px");
+    document.documentElement.style.setProperty("--toolbar-nav-left", (payload.vertical ? sideWidth : 72) + "px");
     window.requestAnimationFrame(syncAddressOverlay);
     if (Array.isArray(payload.blockedLog)) {
       renderBlockedLog(payload.blockedLog);
@@ -1827,6 +1827,7 @@
     if (!overlay || !input) return;
     switcherIndex = 0;
     overlay.hidden = false;
+    document.body.classList.add("switcher-open");
     input.value = "";
     renderSwitcher();
     window.setTimeout(() => input.focus(), 20);

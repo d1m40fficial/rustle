@@ -86,7 +86,7 @@ input:focus-visible,
   align-items: center;
   gap: 8px;
   padding: 0 10px;
-  border-radius: 8px 8px 0 0;
+  border-radius: 8px;
   color: var(--text-muted);
   cursor: default;
 }
@@ -1415,7 +1415,7 @@ html.vertical-mode.overlay-mode .error-view {
   height: 30px;
   max-width: 260px;
   padding: 0 7px;
-  border-radius: 8px 8px 0 0;
+  border-radius: 8px;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -2196,3 +2196,16 @@ body.topbar-compact .tab {
   max-width: 220px;
 }
 body.topbar-compact .tab__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.tab-group { border-radius: 8px; }
+body.topbar-compact .tab--pinned {
+  flex: 0 0 34px;
+  min-width: 34px;
+  max-width: 34px;
+  padding: 0 5px;
+}
+body.topbar-compact .tab--pinned .tab__title { display: none; }
+html.vertical-mode .topbar { padding-left: calc(var(--sidebar-width, 282px) + 8px); }
+
+.switcher-overlay { display: none !important; }
+body.switcher-open .switcher-overlay { display: grid !important; }

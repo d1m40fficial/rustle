@@ -1686,7 +1686,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
                 sidebar_visible && !prompt_open && !switcher_open && !profile_pending;
             let _ = sidebar.set_visible(sidebar_visible);
             if sidebar_visible {
-                let _ = sidebar.set_bounds(rect(0, top, sidebar_width, height.saturating_sub(top)));
+                let _ = sidebar.set_bounds(rect(0, 0, sidebar_width, height));
             }
         }
 
@@ -2616,6 +2616,7 @@ fn apply_tab_memory_levels(state: &Rc<RefCell<AppState>>) {
 }
 
 fn activate_tab(state: &Rc<RefCell<AppState>>, id: TabId) {
+    state.borrow_mut().switcher_open = false;
     let exists = state.borrow().tab(id).is_some();
     if !exists {
         return;
@@ -2710,6 +2711,7 @@ fn new_tab(state: &Rc<RefCell<AppState>>) {
             "Новая вкладка".to_owned(),
         )
     };
+    state.borrow_mut().switcher_open = false;
     activate_tab(state, id);
     if state.borrow().settings.topbar_style != "compact" {
         focus_address(state);
@@ -2905,6 +2907,7 @@ fn new_tab_in_group(state: &Rc<RefCell<AppState>>, group_id: u64) {
         }
         id
     };
+    state.borrow_mut().switcher_open = false;
     activate_tab(state, id);
     if state.borrow().settings.topbar_style != "compact" {
         focus_address(state);
