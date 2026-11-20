@@ -2926,17 +2926,45 @@ fn unload_inactive_tabs(state: &Rc<RefCell<AppState>>) {
 }
 
 fn select_profile(state: &Rc<RefCell<AppState>>, id: u64, pin: &str) {
-    let valid = state
+    let selected = state
         .borrow()
         .profiles
         .profiles
         .iter()
         .find(|profile| profile.id == id)
-        .is_some_and(|profile| profile.pin.is_empty() || profile.pin == pin);
-    if !valid {
-        state.borrow_mut().profile_error = "Неверный PIN".to_owned();
+        .cloned();
+    let Some(selected) = selected else {
+        state.borrow_mut().profile_error = "Профиль не найден".to_owned();
         push_ui_state(state);
         return;
+    };
+    let valid = if selected.pin.is_empty() {
+        pin.len() == 4 && pin.chars().all(|ch| ch.is_ascii_digit())
+    } else {
+        selected.pin == pin
+    };
+    if !valid {
+        state.borrow_mut().profile_error = if selected.pin.is_empty() {
+            "Задайте PIN из 4 цифр".to_owned()
+        } else {
+            "Неверный PIN".to_owned()
+        };
+        push_ui_state(state);
+        return;
+    }
+    if selected.pin.is_empty() {
+        {
+            let mut state_ref = state.borrow_mut();
+            if let Some(profile) = state_ref
+                .profiles
+                .profiles
+                .iter_mut()
+                .find(|profile| profile.id == id)
+            {
+                profile.pin = pin.to_owned();
+            }
+        }
+        save_profiles(&state.borrow().profiles);
     }
     let old_webviews: Vec<WebView> = {
         let mut state_ref = state.borrow_mut();

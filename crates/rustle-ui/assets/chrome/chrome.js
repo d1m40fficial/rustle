@@ -883,13 +883,12 @@
           button.append(dot, document.createTextNode(profile.name + (profile.pin ? " 🔒" : "")));
           button.addEventListener("click", () => {
             selectedProfile = profile.id;
-            if (!profile.pin) {
-              send({ type: "profile.select", id: profile.id, pin: "" });
-            } else {
-              const pin = byId("profile-pin");
-              if (pin) pin.focus();
-              renderProfiles();
+            const pin = byId("profile-pin");
+            if (pin) {
+              pin.value = "";
+              pin.focus();
             }
+            renderProfiles();
           });
           list.append(button);
         });
