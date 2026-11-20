@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="chrome.css">
 </head>
 <body>
+  <div class="topbar" id="topbar">
   <div class="toolbar" role="toolbar" aria-label="Навигация">
     <button class="profile-avatar" id="profile-avatar" type="button" title="Профиль" aria-label="Профиль">
       <span id="profile-avatar-text">Л</span>
@@ -23,6 +24,9 @@
       </button>
     </div>
 
+    <button class="chrome-btn topbar-menu" type="button" id="topbar-menu" title="Настройки" aria-label="Настройки">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
     <button class="chrome-btn" type="button" id="back" data-cmd="nav.back" title="Назад (Alt+←)" aria-label="Назад" disabled>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
@@ -38,6 +42,9 @@
     </button>
 
     <div class="address">
+      <span class="address__search" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m16 16 4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      </span>
       <span class="address__icon" aria-hidden="true">
         <svg viewBox="0 0 24 24"><path d="M7 10V7a5 5 0 0 1 10 0v3" fill="none" stroke="currentColor" stroke-width="1.65"/><rect x="5" y="10" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.65"/></svg>
       </span>
@@ -60,6 +67,7 @@
     <div class="tabs__items" id="tabs"></div>
     <button class="tab-new" type="button" id="new-tab" title="Новая вкладка (Ctrl+T)" aria-label="Новая вкладка">+</button>
     <span class="tabs__spacer"></span>
+  </div>
   </div>
 
   <div class="recovery-banner" id="recovery-banner" hidden>
@@ -95,7 +103,7 @@
         <div class="newtab__brand">Rustle</div>
         <canvas class="newtab__particles" id="newtab-particles"></canvas>
       </div>
-      <p class="newtab__tagline">Минималистичный браузер. 0.38.0.</p>
+      <p class="newtab__tagline">Минималистичный браузер. 0.39.0.</p>
 
       <form class="newtab__search" id="newtab-search" role="search">
         <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
@@ -108,7 +116,14 @@
         <button class="newtab__add newtab__edit" id="newtab-edit" type="button">✎ Редактировать плитки</button>
       </div>
 
-      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.38.0</span></p>
+    <aside class="newtab-history" id="newtab-history">
+      <div class="newtab-history__head">
+        <strong>Недавние</strong>
+        <span>история</span>
+      </div>
+      <div class="newtab-history__list" id="newtab-history-list"></div>
+    </aside>
+      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.39.0</span></p>
     </div>
   </section>
 
@@ -307,6 +322,16 @@
         </span>
         <div id="blocked-list" class="blocked-list"></div>
       </div>
+      <label class="settings__row">
+        <span>
+          <strong>Верхняя панель</strong>
+          <small>Компактная строка или классическая с отдельной панелью вкладок.</small>
+        </span>
+        <select id="setting-topbar-style">
+          <option value="compact">Компактная (opencode)</option>
+          <option value="classic">Классическая</option>
+        </select>
+      </label>
       <label class="settings__row">
         <span>
           <strong>Кнопки окна</strong>

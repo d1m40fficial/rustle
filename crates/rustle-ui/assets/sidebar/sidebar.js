@@ -104,7 +104,10 @@
     });
 
     row.append(favicon, copy, close);
-    row.addEventListener("click", () => send({ type: "tabs.activate", id: tab.id }));
+    row.addEventListener("click", (event) => {
+      if (event.detail >= 3) send({ type: "tabs.close", id: tab.id });
+      else send({ type: "tabs.activate", id: tab.id });
+    });
     row.addEventListener("auxclick", (event) => {
       if (event.button === 1) {
         event.preventDefault();

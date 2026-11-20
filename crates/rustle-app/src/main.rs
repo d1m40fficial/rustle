@@ -873,6 +873,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                 "autoSuspendMinutes": state.settings.auto_suspend_minutes,
                 "toolbarHidden": state.settings.toolbar_hidden,
                 "windowControls": state.settings.window_controls,
+                "topbarStyle": state.settings.topbar_style,
             },
             "adblockStatus": state.adblock_info.to_json(),
             "blockedLog": state.blocked_log,
@@ -1484,6 +1485,7 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
         prompt_open,
         switcher_open,
         profile_pending,
+        compact_topbar,
     ) = {
         let state = state.borrow();
         let overlay_mode = state.active_tab().is_some_and(|tab| {
@@ -1503,10 +1505,11 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
             state.prompt_open,
             state.switcher_open,
             state.profile_pending,
+            state.settings.topbar_style == "compact",
         )
     };
 
-    let target_top = if vertical {
+    let target_top = if vertical || compact_topbar {
         CHROME_VERTICAL
     } else {
         CHROME_COLLAPSED
@@ -1630,7 +1633,13 @@ fn focus_active_content(state: &Rc<RefCell<AppState>>) {
     };
     if overlay {
         if newtab {
-            focus_address(state);
+            if state.borrow().settings.topbar_style == "compact" {
+                if let Some(chrome) = &state.borrow().chrome {
+                    let _ = chrome.focus();
+                }
+            } else {
+                focus_address(state);
+            }
         } else if let Some(chrome) = &state.borrow().chrome {
             let _ = chrome.focus();
         }
@@ -1803,7 +1812,7 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
             tab.id == state.active,
             state.width,
             state.height,
-            if state.vertical {
+            if state.vertical || state.settings.topbar_style == "compact" {
                 CHROME_VERTICAL
             } else {
                 CHROME_COLLAPSED
@@ -6052,6 +6061,11 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                     settings.window_controls = value.to_owned();
                 }
             }
+            if let Some(value) = message.get("topbarStyle").and_then(|value| value.as_str()) {
+                if matches!(value, "classic" | "compact") {
+                    settings.topbar_style = value.to_owned();
+                }
+            }
             if let Some(values) = message
                 .get("toolbarHidden")
                 .and_then(|value| value.as_array())
@@ -7388,7 +7402,11 @@ fn main() -> wry::Result<()> {
                     };
                     (top, side)
                 };
-                let to_top = if enabled { CHROME_VERTICAL } else { CHROME_COLLAPSED };
+                let to_top = if enabled || state.borrow().settings.topbar_style == "compact" {
+                    CHROME_VERTICAL
+                } else {
+                    CHROME_COLLAPSED
+                };
                 let to_side = if enabled {
                     if state.borrow().sidebar_collapsed {
                         SIDEBAR_COLLAPSED

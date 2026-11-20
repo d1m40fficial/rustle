@@ -99,6 +99,8 @@ pub struct Settings {
     pub toolbar_hidden: Vec<String>,
     #[serde(default = "default_window_controls")]
     pub window_controls: String,
+    #[serde(default = "default_topbar_style")]
+    pub topbar_style: String,
 }
 
 fn default_search_engine() -> String {
@@ -127,6 +129,10 @@ fn default_startup() -> String {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_topbar_style() -> String {
+    "compact".to_owned()
 }
 
 fn default_window_controls() -> String {
@@ -176,6 +182,7 @@ impl Default for Settings {
             auto_suspend_minutes: default_auto_suspend(),
             toolbar_hidden: Vec::new(),
             window_controls: default_window_controls(),
+            topbar_style: default_topbar_style(),
         }
     }
 }

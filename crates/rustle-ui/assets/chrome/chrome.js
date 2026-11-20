@@ -940,6 +940,39 @@
     if (ask) ask.checked = current.askProfile === true;
   };
 
+  let historyPanelAt = 0;
+  const loadHistoryPanel = async () => {
+    const panel = byId("newtab-history");
+    const list = byId("newtab-history-list");
+    if (!panel || !list) return;
+    if (Date.now() - historyPanelAt < 8000) return;
+    historyPanelAt = Date.now();
+    try {
+      const data = await request("history.query", { query: "", limit: 12 });
+      const items = (data && data.items) || [];
+      list.replaceChildren();
+      if (!items.length) {
+        panel.hidden = true;
+        return;
+      }
+      panel.hidden = false;
+      items.forEach((item) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "history-chip";
+        const title = document.createElement("strong");
+        title.textContent = item.title || item.url || "Без названия";
+        const url = document.createElement("small");
+        url.textContent = item.url || "";
+        button.append(title, url);
+        button.addEventListener("click", () => send({ type: "tabs.newUrl", url: item.url }));
+        list.append(button);
+      });
+    } catch (error) {
+      console.warn(error);
+    }
+  };
+
   const renderDownloads = (items = current.downloads || []) => {
     const list = byId("downloads-list");
     if (!list) {
@@ -1062,6 +1095,10 @@
     const windowControlsSelect = byId("setting-window-controls");
     if (windowControlsSelect) {
       windowControlsSelect.value = settings.windowControls || "standard";
+    }
+    const topbarSelect = byId("setting-topbar-style");
+    if (topbarSelect) {
+      topbarSelect.value = settings.topbarStyle || "compact";
     }
     const toolbarHidden = settings.toolbarHidden || [];
     const setToolbarToggle = (id, key) => {
@@ -1237,7 +1274,9 @@
     const full = forceFull || focused;
     const value = current.mode === "newtab" ? "" : full ? addressFullValue() : addressDomainValue();
     address.value = value;
-    address.placeholder = current.mode === "newtab" ? "Поиск или адрес" : "";
+    address.placeholder = document.body.classList.contains("topbar-compact")
+      ? (document.activeElement === address ? "Поиск или адрес" : "Поиск")
+      : (current.mode === "newtab" ? "Поиск или адрес" : "");
     address.classList.toggle("address__input--domain", !full && Boolean(value));
     address.classList.toggle("address__input--full", full && Boolean(value));
   };
@@ -1481,6 +1520,12 @@
     }
     const windowControlsStyle = payload.settings?.windowControls || "standard";
     document.body.classList.toggle("window-controls-standard", windowControlsStyle === "standard");
+    const topbarStyle = payload.settings?.topbarStyle || "compact";
+    document.body.classList.toggle("topbar-compact", topbarStyle === "compact");
+    const addressInput = byId("address");
+    if (addressInput && topbarStyle === "compact" && !addressInput.value) {
+      addressInput.placeholder = document.activeElement === addressInput ? "Поиск или адрес" : "Поиск";
+    }
     const toolbarHidden = payload.settings?.toolbarHidden || [];
     const toolbarMap = {
       translate: byId("translate-page"),
@@ -2474,7 +2519,7 @@
     });
     const toolbarHome = byId("toolbar-home");
     if (toolbarHome) {
-      toolbarHome.addEventListener("click", () => send({ type: "nav.go", url: "rustle://newtab" }));
+      toolbarHome.addEventListener("click", () => send({ type: "tabs.newUrl", url: "rustle://newtab" }));
     }
     const tilesEdit = byId("newtab-edit");
     if (tilesEdit) {
@@ -2787,6 +2832,20 @@
   const profileAvatar = byId("profile-avatar");
   if (profileAvatar) {
     profileAvatar.addEventListener("click", () => send({ type: "profile.picker" }));
+  }
+
+  const topbarMenu = byId("topbar-menu");
+  if (topbarMenu) {
+    topbarMenu.addEventListener("click", () => send({ type: "nav.go", url: "rustle://settings" }));
+  }
+  const compactAddress = byId("address");
+  if (compactAddress) {
+    compactAddress.addEventListener("focus", () => {
+      if (document.body.classList.contains("topbar-compact")) compactAddress.placeholder = "Поиск или адрес";
+    });
+    compactAddress.addEventListener("blur", () => {
+      if (document.body.classList.contains("topbar-compact") && !compactAddress.value) compactAddress.placeholder = "Поиск";
+    });
   }
 
   initParticleHero();
