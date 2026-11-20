@@ -985,8 +985,8 @@
     popover.classList.add("is-visible");
     const rect = stick.getBoundingClientRect();
     const box = popover.getBoundingClientRect();
-    let left = rect.left - box.width - 10;
-    if (left < 8) left = 8;
+    let left = rect.left - box.width - 14;
+    if (left < 10) left = 10;
     let top = rect.top + rect.height / 2 - box.height / 2;
     top = Math.max(8, Math.min(top, window.innerHeight - box.height - 8));
     popover.style.left = left + "px";

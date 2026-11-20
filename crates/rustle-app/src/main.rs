@@ -3190,22 +3190,12 @@ fn select_profile(state: &Rc<RefCell<AppState>>, id: u64, pin: &str) {
         views
     };
     drop(old_webviews);
-    if state.borrow().tabs.is_empty() {
-        new_tab(state);
-        return;
-    }
-    if state
-        .borrow()
-        .active_tab()
-        .is_some_and(|tab| tab.url.starts_with("rustle://"))
     {
-        new_tab(state);
-        return;
+        let mut state_ref = state.borrow_mut();
+        state_ref.tabs.clear();
+        state_ref.active = TabId(0);
     }
-    let active = state.borrow().active;
-    ensure_tab_webview(state, active);
-    apply_layout(state);
-    push_ui_state(state);
+    new_tab(state);
 }
 
 fn create_profile(state: &Rc<RefCell<AppState>>, name: &str, pin: &str) {
