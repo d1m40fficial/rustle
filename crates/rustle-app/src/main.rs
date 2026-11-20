@@ -2731,11 +2731,16 @@ fn close_tab(state: &Rc<RefCell<AppState>>, id: TabId) {
 fn new_tab(state: &Rc<RefCell<AppState>>) {
     let id = {
         let mut state = state.borrow_mut();
-        push_tab(
+        let zoom = state.active_tab().map(|tab| tab.zoom).unwrap_or(1.0);
+        let id = push_tab(
             &mut state,
             NEWTAB_URL.to_owned(),
             "Новая вкладка".to_owned(),
-        )
+        );
+        if let Some(tab) = state.tab_mut(id) {
+            tab.zoom = zoom;
+        }
+        id
     };
     state.borrow_mut().switcher_open = false;
     activate_tab(state, id);
@@ -2923,6 +2928,7 @@ fn new_tab_in_group(state: &Rc<RefCell<AppState>>, group_id: u64) {
         if let Some(group) = state.groups.iter_mut().find(|group| group.id == group_id) {
             group.collapsed = false;
         }
+        let zoom = state.active_tab().map(|tab| tab.zoom).unwrap_or(1.0);
         let id = push_tab(
             &mut state,
             NEWTAB_URL.to_owned(),
@@ -2930,6 +2936,7 @@ fn new_tab_in_group(state: &Rc<RefCell<AppState>>, group_id: u64) {
         );
         if let Some(tab) = state.tab_mut(id) {
             tab.group = Some(group_id);
+            tab.zoom = zoom;
         }
         id
     };

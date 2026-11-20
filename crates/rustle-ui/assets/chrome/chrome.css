@@ -2389,3 +2389,28 @@ body.switcher-open .switcher-overlay { display: grid !important; }
 }
 .history-popover strong { display: block; max-width: 256px; overflow: hidden; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .history-popover small { display: block; max-width: 256px; margin-top: 2px; overflow: hidden; color: rgba(255,255,255,.48); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+
+.history-sticks {
+  right: 20px;
+  width: 44px;
+  max-height: 60vh;
+  pointer-events: auto;
+}
+.history-sticks__scroll {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 20px 0;
+}
+.stick-group { gap: 6px; }
+.stick-divider { display: none; }
+.history-stick {
+  width: 24px;
+  height: 2px;
+  flex: 0 0 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--text) 30%, transparent);
+}
+.history-stick:hover, .history-stick:focus-visible {
+  width: 32px;
+  background: var(--text);
+}

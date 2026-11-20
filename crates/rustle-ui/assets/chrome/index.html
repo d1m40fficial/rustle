@@ -103,7 +103,7 @@
         <div class="newtab__brand">Rustle</div>
         <canvas class="newtab__particles" id="newtab-particles"></canvas>
       </div>
-      <p class="newtab__tagline">Минималистичный браузер. 0.41.5.</p>
+      <p class="newtab__tagline">Минималистичный браузер. 0.41.8.</p>
 
       <form class="newtab__search" id="newtab-search" role="search">
         <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
@@ -124,7 +124,7 @@
       </div>
     </aside>
     <div class="history-popover" id="history-popover" role="tooltip"></div>
-      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.41.5</span></p>
+      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.41.8</span></p>
     </div>
   </section>
 
@@ -457,9 +457,9 @@
       <h2>Выберите профиль</h2>
       <p class="page-hint">Данные профилей хранятся отдельно.</p>
       <div class="profile-list" id="profile-list"></div>
-      <input class="profile-pin" id="profile-pin" type="password" inputmode="numeric" maxlength="4" placeholder="PIN (4 цифры)" autocomplete="off">
+      <input class="profile-pin" id="profile-pin" type="password" inputmode="numeric" maxlength="4" placeholder="PIN (4 цифры)" autocomplete="off" hidden>
       <span class="profile-error" id="profile-error"></span>
-      <button class="button button--primary" id="profile-enter" type="button">Войти</button>
+      <button class="button button--primary" id="profile-enter" type="button" hidden>Войти</button>
     </div>
   </div>
 

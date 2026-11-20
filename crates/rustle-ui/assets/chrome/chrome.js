@@ -863,6 +863,12 @@
   const renderProfiles = () => {
     const profiles = current.profiles || [];
     const active = current.activeProfile || 0;
+    const pinInput = byId("profile-pin");
+    const pinEnter = byId("profile-enter");
+    const selected = profiles.find((profile) => profile.id === selectedProfile);
+    const needsPin = Boolean(selected && selected.pin);
+    if (pinInput) pinInput.hidden = !needsPin;
+    if (pinEnter) pinEnter.hidden = !needsPin;
     const activeProfile = profiles.find((profile) => profile.id === active);
     const avatar = byId("profile-avatar");
     const avatarText = byId("profile-avatar-text");
@@ -895,9 +901,12 @@
             } else {
               const pin = byId("profile-pin");
               if (pin) {
+                pin.hidden = false;
                 pin.value = "";
                 pin.focus();
               }
+              const enter = byId("profile-enter");
+              if (enter) enter.hidden = false;
               renderProfiles();
             }
           });
@@ -1914,7 +1923,7 @@
       const height = Math.round(rect.height);
       canvas.width = width;
       canvas.height = height;
-      const light = document.documentElement.classList.contains("light");
+      const light = document.documentElement.dataset.theme === "light";
       const color = light ? "rgba(0, 0, 0, 0.88)" : "rgba(255, 255, 255, 0.96)";
       const logoRect = logo.getBoundingClientRect();
       const brandRect = brand.getBoundingClientRect();
@@ -1959,6 +1968,28 @@
         }
       }
 
+      if (!next.length) {
+        const left = Math.max(0, Math.round(brandRect.left - rect.left));
+        const top = Math.max(0, Math.round(brandRect.top - rect.top));
+        for (let y = top; y < top + Math.max(40, brandRect.height); y += 3) {
+          for (let x = left; x < left + Math.max(120, brandRect.width); x += 3) {
+            next.push({ x, y, ox: x, oy: y, vx: 0, vy: 0, size: 1.35, color });
+          }
+        }
+      }
+      if (next.length) {
+        const cx = Math.round((logoRect.left + logoRect.width / 2) - rect.left);
+        const cy = Math.round((logoRect.top + logoRect.height / 2) - rect.top);
+        for (let i = 0; i < 140; i += 1) {
+          const angle = i * 2.399963;
+          const radius = 58 + (i % 19) * 7;
+          const x = cx + Math.cos(angle) * radius;
+          const y = cy + Math.sin(angle) * radius * 0.62;
+          if (x > 0 && y > 0 && x < width && y < height) {
+            next.push({ x, y, ox: x, oy: y, vx: 0, vy: 0, size: 1.2, color });
+          }
+        }
+      }
       if (next.length > 5200) {
         const stride = Math.ceil(next.length / 5200);
         particles = next.filter((_, index) => index % stride === 0);
