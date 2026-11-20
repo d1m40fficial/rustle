@@ -2187,3 +2187,12 @@ body.topbar-compact .window-controls { right: 0; height: 44px; z-index: 6; }
 .history-chip:hover strong { font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-chip:hover small { color: var(--faint); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 1120px) { .newtab-history { display: flex; } }
+
+.tabs__divider--short { height: 12px; margin: 0 3px; opacity: 0.55; }
+.settings-nav__rule { height: 1px; margin: 8px 0; background: var(--border); }
+body.topbar-compact .tab {
+  flex: 1 1 120px;
+  min-width: 44px;
+  max-width: 220px;
+}
+body.topbar-compact .tab__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

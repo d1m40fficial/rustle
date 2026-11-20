@@ -1050,6 +1050,7 @@ fn raise_sidebar(state: &Rc<RefCell<AppState>>) {
 #[cfg(target_os = "windows")]
 mod native_menu {
     use super::{AppState, TabId};
+    use crate::{AppEvent, apply_zoom, push_ui_state, zoom_active};
     use std::cell::RefCell;
     use std::rc::Rc;
     use tao::platform::windows::WindowExtWindows;
@@ -1431,6 +1432,53 @@ mod native_menu {
             return;
         };
         if action.is_empty() {
+            return;
+        }
+        let quick = action.starts_with("app.theme")
+            || action.starts_with("app.zoom")
+            || action.starts_with("app.language")
+            || action == "app.vertical"
+            || action == "app.settings";
+        if quick {
+            match action.as_str() {
+                "app.settings" => {
+                    let _ = state
+                        .borrow()
+                        .proxy
+                        .send_event(AppEvent::Navigate("rustle://settings".to_owned()));
+                }
+                "app.theme" => {
+                    let mut settings = state.borrow().settings.clone();
+                    settings.theme = if settings.theme == "light" {
+                        "dark".to_owned()
+                    } else {
+                        "light".to_owned()
+                    };
+                    if !state.borrow().private {
+                        let _ = rustle_storage::save_settings(&settings);
+                    }
+                    state.borrow_mut().settings = settings;
+                    push_ui_state(state);
+                }
+                "app.zoomIn" => zoom_active(state, 0.1),
+                "app.zoomOut" => zoom_active(state, -0.1),
+                "app.zoomReset" => apply_zoom(state, 1.0),
+                "app.language.ru" | "app.language.en" => {
+                    let language = if action.ends_with("en") { "en" } else { "ru" };
+                    let mut settings = state.borrow().settings.clone();
+                    settings.language = language.to_owned();
+                    if !state.borrow().private {
+                        let _ = rustle_storage::save_settings(&settings);
+                    }
+                    state.borrow_mut().settings = settings;
+                    push_ui_state(state);
+                }
+                "app.vertical" => {
+                    let enabled = !state.borrow().vertical;
+                    let _ = state.borrow().proxy.send_event(AppEvent::Vertical(enabled));
+                }
+                _ => {}
+            }
             return;
         }
         let action = serde_json::to_string(&action).unwrap_or_else(|_| "\"\"".to_owned());
@@ -1834,6 +1882,18 @@ fn on_page_load(state: &Rc<RefCell<AppState>>, tab_id: TabId, event: PageLoadEve
         PageLoadEvent::Finished => {
             sync_tab_from_webview(state, tab_id);
             hide_loading_overlay(state, tab_id);
+            let zoom = state
+                .borrow()
+                .tab(tab_id)
+                .map(|tab| tab.zoom)
+                .unwrap_or(1.0);
+            if let Some(webview) = state
+                .borrow()
+                .tab(tab_id)
+                .and_then(|tab| tab.webview.as_ref())
+            {
+                let _ = webview.evaluate_script(&zoom_chip_script(zoom));
+            }
             let is_rutube = state
                 .borrow()
                 .tab(tab_id)
@@ -2651,7 +2711,9 @@ fn new_tab(state: &Rc<RefCell<AppState>>) {
         )
     };
     activate_tab(state, id);
-    focus_address(state);
+    if state.borrow().settings.topbar_style != "compact" {
+        focus_address(state);
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -2844,7 +2906,9 @@ fn new_tab_in_group(state: &Rc<RefCell<AppState>>, group_id: u64) {
         id
     };
     activate_tab(state, id);
-    focus_address(state);
+    if state.borrow().settings.topbar_style != "compact" {
+        focus_address(state);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -4848,6 +4912,24 @@ fn export_bookmarks_file(state: &Rc<RefCell<AppState>>, request_id: u64, items: 
 }
 
 #[cfg(target_os = "windows")]
+fn zoom_chip_script(zoom: f64) -> String {
+    let percent = (zoom * 100.0).round() as i32;
+    format!(
+        r#"(function(){{
+  var id = "rustle-zoom-chip";
+  var old = document.getElementById(id);
+  if (percent === 100) {{ if (old) old.remove(); return; }}
+  var chip = old || document.createElement("button");
+  chip.id = id;
+  chip.textContent = "{percent}%";
+  chip.title = "Сбросить масштаб";
+  chip.style.cssText = "position:fixed;left:8px;top:8px;z-index:2147483646;height:26px;min-width:44px;padding:0 9px;border:1px solid rgba(255,255,255,.18);border-radius:999px;background:rgba(37,37,37,.94);color:#e6e6e6;font:11px/24px sans-serif;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.35)";
+  chip.onclick = function() {{ if (window.ipc) window.ipc.postMessage(JSON.stringify({{type:"zoom.reset"}})); }};
+  if (!old) document.documentElement.appendChild(chip);
+}})();"#
+    )
+}
+
 fn apply_zoom(state: &Rc<RefCell<AppState>>, factor: f64) {
     let factor = factor.clamp(0.5, 3.0);
     {
@@ -4862,6 +4944,13 @@ fn apply_zoom(state: &Rc<RefCell<AppState>>, factor: f64) {
                 let _ = webview.controller().SetZoomFactor(factor);
             }
         }
+    }
+    if let Some(webview) = state
+        .borrow()
+        .active_tab()
+        .and_then(|tab| tab.webview.as_ref())
+    {
+        let _ = webview.evaluate_script(&zoom_chip_script(factor));
     }
     push_ui_state(state);
 }

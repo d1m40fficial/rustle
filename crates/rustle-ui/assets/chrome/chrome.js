@@ -272,11 +272,6 @@
     const pinned = tabs.filter((tab) => tab.pinned);
     const rest = tabs.filter((tab) => !tab.pinned);
     pinned.forEach((tab) => container.append(makeTabElement(tab, activeId, true)));
-    if (pinned.length) {
-      const divider = document.createElement("span");
-      divider.className = "tabs__divider";
-      container.append(divider);
-    }
 
     const groups = current.groups || [];
     const renderedGroups = new Set();
@@ -298,6 +293,18 @@
       const children = rest.filter((entry) => entry.groupId === groupId);
       container.append(makeGroupElement(group, children, activeId));
     });
+
+    const tabLike = (node) => node.classList && (node.classList.contains("tab") || node.classList.contains("tab-group"));
+    const nodes = [...container.children];
+    let previousTab = false;
+    for (const node of nodes) {
+      if (tabLike(node) && previousTab) {
+        const divider = document.createElement("span");
+        divider.className = "tabs__divider tabs__divider--short";
+        container.insertBefore(divider, node);
+      }
+      previousTab = tabLike(node);
+    }
 
     const active = container.querySelector(".tab--active");
     if (active) {
@@ -1550,7 +1557,11 @@
     if (payload.language) {
       applyLanguage(payload.language);
     }
-    if (payload.switcherOpen === true) {
+    if (payload.vertical) {
+      const switcher = byId("switcher-overlay");
+      if (switcher) switcher.hidden = true;
+      current.switcherOpen = false;
+    } else if (payload.switcherOpen === true) {
       openSwitcher();
     } else if (payload.switcherOpen === false) {
       hideSwitcher();
@@ -1615,6 +1626,7 @@
     const error = payload.error;
 
     document.documentElement.classList.toggle("newtab-mode", newtab);
+    if (newtab) loadHistoryPanel();
     window.__rustleParticles?.[newtab ? "start" : "stop"]?.();
     if (payload.settings) {
       window.__rustleParticles?.configure(payload.settings);
