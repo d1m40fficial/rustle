@@ -1507,6 +1507,8 @@ mod native_menu {
         let quick = action.starts_with("app.theme")
             || action.starts_with("app.zoom")
             || action.starts_with("app.language")
+            || action == "app.translate"
+            || action == "app.downloads"
             || action == "app.vertical"
             || action == "app.settings";
         if quick {

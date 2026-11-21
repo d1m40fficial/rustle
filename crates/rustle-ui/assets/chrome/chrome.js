@@ -2615,6 +2615,15 @@
       });
     }
 
+    const settingsExport = byId("settings-export");
+    if (settingsExport) {
+      settingsExport.addEventListener("click", () => send({ type: "settings.export" }));
+    }
+    const settingsImport = byId("settings-import");
+    if (settingsImport) {
+      settingsImport.addEventListener("click", () => send({ type: "settings.import" }));
+    }
+
     const retry = byId("error-retry");
     if (retry) {
       retry.addEventListener("click", () => send({ type: "nav.retry" }));
@@ -3080,19 +3089,7 @@
     });
     const actions = document.querySelector("#settings-form .settings__actions");
     if (actions) actions.id = "setting-actions";
-    document.querySelectorAll("[data-setting-target]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const target = document.getElementById(button.dataset.settingTarget);
-        if (target) {
-          target.scrollIntoView({ block: "start", behavior: "smooth" });
-        } else {
-          send({ type: "nav.go", url: "rustle://settings" });
-          window.setTimeout(() => {
-            document.getElementById(button.dataset.settingTarget)?.scrollIntoView({ block: "start", behavior: "smooth" });
-          }, 180);
-        }
-      });
-    });
+
   };
 
   initSettingsNav();
