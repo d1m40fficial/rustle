@@ -2587,3 +2587,26 @@ body.topbar-compact .tab--pinned .tab__title { display: none; }
 }
 html.settings-rail-open .internal-page { padding-left: 252px; }
 .settings-layout { display: block; max-width: 720px; margin: 0; }
+
+.history-stick {
+  height: 11px;
+  padding: 4px 0;
+  background: transparent !important;
+  border-radius: 0;
+}
+.history-stick::before {
+  content: "";
+  display: block;
+  width: 100%;
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text) 34%, transparent);
+  transition: background .16s ease;
+}
+.history-stick:hover, .history-stick:focus-visible {
+  background: transparent !important;
+  transform: scaleX(1.1);
+}
+.history-stick:hover::before, .history-stick:focus-visible::before {
+  background: var(--text);
+}

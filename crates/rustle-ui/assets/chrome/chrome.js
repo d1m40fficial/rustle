@@ -1028,7 +1028,7 @@
       stick.addEventListener("click", () => send({ type: "tabs.newUrl", url: item.url }));
       const scale = total > 1 ? (startIndex + count) / (total - 1) : 1;
       stick.style.setProperty("--width-scale", scale.toFixed(3));
-      stick.style.setProperty("--stick-width", historyKind ? "12px" : "24px");
+      stick.style.setProperty("--stick-width", historyKind ? "16px" : "32px");
       group.append(stick);
       count += 1;
     });
@@ -1764,6 +1764,9 @@
     } else {
       currentInternalPage = "";
       hideInternalPages();
+      const rail = byId("global-settings-rail");
+      if (rail) rail.hidden = true;
+      document.documentElement.classList.remove("settings-rail-open");
     }
 
     const reload = byId("reload");
@@ -3037,6 +3040,30 @@
     "Автосон вкладок": "setting-auto-suspend",
     "Библиотека сессий": "setting-sessions",
   };
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-setting-target]");
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const id = button.dataset.settingTarget;
+    const findTarget = () => {
+      const byId = document.getElementById(id);
+      if (byId) return byId;
+      const label = (button.textContent || "").trim();
+      return [...document.querySelectorAll("#settings-form .settings__row")].find((row) => {
+        const strong = row.querySelector("strong");
+        return strong && strong.textContent.trim() === label;
+      }) || null;
+    };
+    const target = findTarget();
+    if (target) {
+      target.scrollIntoView({ block: "start", behavior: "smooth" });
+    } else {
+      send({ type: "nav.go", url: "rustle://settings" });
+      window.setTimeout(() => findTarget()?.scrollIntoView({ block: "start", behavior: "smooth" }), 220);
+    }
+  });
+
   const mountSettingsRail = () => {
     const rail = byId("global-settings-rail");
     const nav = document.querySelector("#page-settings .settings-nav");
