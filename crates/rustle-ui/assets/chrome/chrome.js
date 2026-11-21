@@ -2504,6 +2504,13 @@
 
     const settingsForm = byId("settings-form");
     if (settingsForm) {
+      let settingsSaveTimer = 0;
+      const queueSettingsSave = () => {
+        window.clearTimeout(settingsSaveTimer);
+        settingsSaveTimer = window.setTimeout(() => settingsForm.requestSubmit(), 250);
+      };
+      settingsForm.addEventListener("change", queueSettingsSave);
+      settingsForm.addEventListener("input", queueSettingsSave);
       settingsForm.addEventListener("submit", (event) => {
         event.preventDefault();
         send({

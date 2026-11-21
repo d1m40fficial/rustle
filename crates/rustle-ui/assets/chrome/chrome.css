@@ -2456,3 +2456,44 @@ body.switcher-open .switcher-overlay { display: grid !important; }
   transform: scaleX(1.12);
   transform-origin: right center;
 }
+
+.settings-nav__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.settings-nav__actions .button {
+  width: 100%;
+  font-size: 11px;
+  text-align: left;
+}
+.settings-nav__actions .settings__status { font-size: 10px; color: var(--faint); }
+
+.history-sticks {
+  height: 70vh;
+  max-height: 70vh;
+}
+.history-sticks__scroll {
+  max-height: 100%;
+  gap: 8px;
+  padding: 20px 0;
+}
+.stick-group {
+  gap: 8px !important;
+}
+.history-stick {
+  display: block;
+  margin: 0;
+  flex: 0 0 2px;
+  width: calc(20px + (40px * var(--width-scale, 1)));
+  transition: background-color .18s ease, transform .18s ease;
+}
+.history-stick:hover, .history-stick:focus-visible {
+  width: calc(20px + (40px * var(--width-scale, 1))) !important;
+  background: var(--text);
+  transform: scaleX(1.06);
+  transform-origin: right center;
+}
