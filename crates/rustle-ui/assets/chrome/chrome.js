@@ -1028,8 +1028,7 @@
       stick.addEventListener("click", () => send({ type: "tabs.newUrl", url: item.url }));
       const scale = total > 1 ? (startIndex + count) / (total - 1) : 1;
       stick.style.setProperty("--width-scale", scale.toFixed(3));
-      stick.style.setProperty("--stick-min", historyKind ? "5px" : "10px");
-      stick.style.setProperty("--stick-range", historyKind ? "10px" : "20px");
+      stick.style.setProperty("--stick-width", historyKind ? "12px" : "24px");
       group.append(stick);
       count += 1;
     });
@@ -2524,7 +2523,7 @@
       let settingsSaveTimer = 0;
       const queueSettingsSave = () => {
         window.clearTimeout(settingsSaveTimer);
-        settingsSaveTimer = window.setTimeout(() => settingsForm.requestSubmit(), 250);
+        settingsSaveTimer = window.setTimeout(() => settingsForm.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true })), 250);
       };
       settingsForm.addEventListener("change", queueSettingsSave);
       settingsForm.addEventListener("input", queueSettingsSave);
@@ -2538,11 +2537,7 @@
           startup: byId("setting-startup").value,
           autoSuspendMinutes: Number(byId("setting-auto-suspend")?.value || 30),
           windowControls: byId("setting-window-controls")?.value || "standard",
-          toolbarHidden: [
-            !byId("toolbar-translate")?.checked ? "translate" : null,
-            !byId("toolbar-downloads")?.checked ? "downloads" : null,
-            !byId("toolbar-theme")?.checked ? "theme" : null,
-          ].filter(Boolean),
+          topbarStyle: byId("setting-topbar-style")?.value || "compact",
           httpsFirst: byId("setting-https").checked,
           clearOnExit: byId("setting-clear-exit").checked,
           adblock: byId("setting-adblock").checked,

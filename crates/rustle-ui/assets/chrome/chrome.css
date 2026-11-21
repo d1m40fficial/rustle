@@ -2536,3 +2536,32 @@ body.topbar-compact .profile-chip {
   top: 9px;
   z-index: 8;
 }
+
+.profile-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: fixed;
+  right: 150px;
+  top: 9px;
+  z-index: 60;
+}
+
+body.topbar-compact .tab--pinned {
+  flex: 0 0 34px !important;
+  width: 34px !important;
+  min-width: 34px !important;
+  max-width: 34px !important;
+  padding: 0 5px;
+}
+body.topbar-compact .tab--pinned .tab__title { display: none; }
+
+.history-stick {
+  width: var(--stick-width, 24px) !important;
+}
+.history-stick:hover, .history-stick:focus-visible {
+  width: var(--stick-width, 24px) !important;
+  background: var(--text);
+  transform: scaleX(1.08);
+  transform-origin: right center;
+}

@@ -1267,6 +1267,36 @@ mod native_menu {
                 "Язык: English"
             },
         );
+        push_checked(
+            items,
+            "app.toolbar.translate",
+            "Переводчик",
+            !state
+                .settings
+                .toolbar_hidden
+                .iter()
+                .any(|item| item == "translate"),
+        );
+        push_checked(
+            items,
+            "app.toolbar.downloads",
+            "Загрузки",
+            !state
+                .settings
+                .toolbar_hidden
+                .iter()
+                .any(|item| item == "downloads"),
+        );
+        push_checked(
+            items,
+            "app.toolbar.theme",
+            "Тема панели",
+            !state
+                .settings
+                .toolbar_hidden
+                .iter()
+                .any(|item| item == "theme"),
+        );
         separator(items);
         push_checked(
             items,
@@ -1521,6 +1551,7 @@ mod native_menu {
         let quick = action.starts_with("app.theme")
             || action.starts_with("app.zoom")
             || action.starts_with("app.language")
+            || action.starts_with("app.toolbar")
             || action == "app.vertical"
             || action == "app.settings";
         if quick {

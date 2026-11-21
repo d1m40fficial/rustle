@@ -51,6 +51,10 @@
       <input id="address" class="address__input" type="text" value="" placeholder="Поиск или адрес" spellcheck="false" autocomplete="off" aria-label="Адресная строка">
     </div>
 
+    <button class="profile-chip" id="profile-chip" type="button" title="Профиль" aria-label="Профиль">
+      <span id="profile-chip-text">M</span>
+    </button>
+
     <span class="zoom-label" id="zoom-label" title="Масштаб — сбросить" role="button" tabindex="0" aria-live="polite">100%</span>
 
     <button class="chrome-btn" type="button" id="translate-page" title="Google Переводчик" aria-label="Google Переводчик"><span class="translate-icon">A文</span></button>
@@ -103,7 +107,7 @@
         <div class="newtab__brand">Rustle</div>
         <canvas class="newtab__particles" id="newtab-particles"></canvas>
       </div>
-      <p class="newtab__tagline">Минималистичный браузер. 0.41.17.</p>
+      <p class="newtab__tagline">Минималистичный браузер. 0.41.19.</p>
 
       <form class="newtab__search" id="newtab-search" role="search">
         <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
@@ -124,7 +128,7 @@
       </div>
     </aside>
     <div class="history-popover" id="history-popover" role="tooltip"></div>
-      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.41.17</span></p>
+      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.41.19</span></p>
     </div>
   </section>
 
@@ -202,7 +206,6 @@
         <button type="button" data-setting-target="setting-profiles">Профили</button>
         <button type="button" data-setting-target="setting-topbar-style">Верхняя панель</button>
         <button type="button" data-setting-target="setting-window-controls">Кнопки окна</button>
-        <button type="button" data-setting-target="setting-toolbar">Кнопки панели</button>
         <button type="button" data-setting-target="setting-auto-suspend">Автосон</button>
         <button type="button" data-setting-target="setting-sessions">Сессии</button>
 
@@ -239,98 +242,8 @@
         </span>
         <input id="setting-adblock" type="checkbox">
       </label>
-      <div class="settings__row">
-        <span>
-          <strong>Фильтры Adblock</strong>
-          <small id="adblock-status">Загрузка…</small>
-        </span>
-        <button id="adblock-update" class="button" type="button">Обновить</button>
       </div>
-      <label class="settings__row settings__row--stack">
-        <span>
-          <strong>Исключения Adblock</strong>
-          <small>Домены через запятую — реклама на них не блокируется.</small>
-        </span>
-        <textarea class="settings__exceptions" id="setting-adblock-exceptions" rows="2" placeholder="hltv.org"></textarea>
-      </label>
-      <label class="settings__row settings__row--stack">
-        <span>
-          <strong>Свои правила Adblock</strong>
-          <small>По одному правилу на строку. Поддерживаются домены, ||домен^ и @@исключения.</small>
-        </span>
-        <textarea class="settings__exceptions" id="setting-adblock-rules" rows="3" placeholder="||ads.example.com^"></textarea>
-      </label>
-      <label class="settings__row">
-        <span>
-          <strong>Очищать при выходе</strong>
-          <small>Удалять историю, сессию и данные WebView2 после закрытия.</small>
-        </span>
-        <input id="setting-clear-exit" type="checkbox">
-      </label>
-      <div class="settings__row settings__row--stack">
-        <span>
-          <strong>Библиотека сессий</strong>
-          <small>Сохраняйте наборы вкладок с названием и превью.</small>
-        </span>
-        <div class="settings__session-create">
-          <input id="session-name" type="text" placeholder="Название сессии" autocomplete="off">
-          <input id="session-tags" type="text" placeholder="Теги через запятую" autocomplete="off">
-          <button id="session-save" class="button" type="button">Сохранить текущую</button>
-        </div>
-        <input id="session-filter" type="text" placeholder="Поиск по сессиям и тегам" autocomplete="off">
-        <div id="sessions-list" class="sessions-list"></div>
-      </div>
-      <div class="settings__row settings__row--stack">
-        <span>
-          <strong>Журнал блокировок</strong>
-          <small>Последние заблокированные запросы.</small>
-        </span>
-        <div id="blocked-list" class="blocked-list"></div>
-      </div>
-      <label class="settings__row">
-        <span>
-          <strong>Верхняя панель</strong>
-          <small>Компактная строка или классическая с отдельной панелью вкладок.</small>
-        </span>
-        <select id="setting-topbar-style">
-          <option value="compact">Компактная</option>
-          <option value="classic">Классическая</option>
-        </select>
-      </label>
-      <label class="settings__row">
-        <span>
-          <strong>Кнопки окна</strong>
-          <small>Светофор macOS или стандартные кнопки Windows.</small>
-        </span>
-        <select id="setting-window-controls">
-          <option value="traffic">Светофор</option>
-          <option value="standard">Стандартные Windows</option>
-        </select>
-      </label>
-      <div class="settings__row settings__row--stack">
-        <span>
-          <strong>Профили</strong>
-          <small>Отдельные cookie и данные сайтов. PIN — 4 цифры.</small>
-        </span>
-        <label class="profile-ask"><input type="checkbox" id="profile-ask"> Спрашивать профиль при открытии</label>
-        <div class="profile-settings-list" id="profile-settings-list"></div>
-        <div class="profile-create">
-          <input id="profile-name" type="text" placeholder="Название профиля" autocomplete="off">
-          <input id="profile-new-pin" type="password" inputmode="numeric" maxlength="4" placeholder="PIN (необязательно)" autocomplete="off">
-          <button class="button" id="profile-create" type="button">Создать профиль</button>
-        </div>
-      </div>
-      <div class="settings__row settings__row--stack">
-        <span>
-          <strong>Кнопки панели</strong>
-          <small>Что показывать в верхней панели.</small>
-        </span>
-        <div class="toolbar-toggles">
-          <label><input type="checkbox" id="toolbar-translate"> Переводчик</label>
-          <label><input type="checkbox" id="toolbar-downloads"> Загрузки</label>
-          <label><input type="checkbox" id="toolbar-theme"> Тема</label>
-        </div>
-      </div>
+      <button type="submit" hidden aria-hidden="true"></button>
     </form>
   </section>
 
