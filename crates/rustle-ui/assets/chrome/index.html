@@ -108,7 +108,7 @@
         <div class="newtab__brand">Rustle</div>
         <canvas class="newtab__particles" id="newtab-particles"></canvas>
       </div>
-      <p class="newtab__tagline">Минималистичный браузер. 0.41.23.</p>
+      <p class="newtab__tagline">Минималистичный браузер. 0.41.24.</p>
 
       <form class="newtab__search" id="newtab-search" role="search">
         <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
@@ -129,7 +129,7 @@
       </div>
     </aside>
     <div class="history-popover" id="history-popover" role="tooltip"></div>
-      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.41.23</span></p>
+      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.41.24</span></p>
     </div>
   </section>
 
@@ -182,7 +182,12 @@
 
     <div class="settings-layout">
       <nav class="settings-nav" aria-label="Разделы настроек">
-
+        <div class="settings-nav__actions">
+          <button id="clear-data" class="button" type="button">Очистить cookies и кэш</button>
+          <button id="settings-export" class="button" type="button">Экспорт настроек</button>
+          <button id="settings-import" class="button" type="button">Импорт настроек</button>
+          <span id="settings-status" class="settings__status"></span>
+        </div>
         <p>Разделы</p>
         <button type="button" data-nav="rustle://history">История</button>
         <button type="button" data-nav="rustle://bookmarks">Закладки</button>
@@ -205,14 +210,55 @@
         <button type="button" data-setting-target="setting-auto-suspend">Автосон</button>
         <button type="button" data-setting-target="setting-sessions">Сессии</button>
 
-        <div class="settings-nav__actions">
-          <button id="clear-data" class="button" type="button">Очистить cookies и кэш</button>
-          <button id="settings-export" class="button" type="button">Экспорт настроек</button>
-          <button id="settings-import" class="button" type="button">Импорт настроек</button>
-          <span id="settings-status" class="settings__status"></span>
-        </div>
       </nav>
       <form id="settings-form" class="settings">
+      <label class="settings__row">
+        <span>
+          <strong>Поисковик</strong>
+          <small>Используется для запросов из адресной строки.</small>
+        </span>
+        <select id="setting-engine">
+          <option value="ddg">DuckDuckGo</option>
+          <option value="google">Google</option>
+          <option value="yandex">Яндекс</option>
+          <option value="bing">Bing</option>
+        </select>
+      </label>
+      <label class="settings__row">
+        <span>
+          <strong>Тема</strong>
+          <small>Светлая или тёмная оболочка браузера.</small>
+        </span>
+        <select id="setting-theme">
+          <option value="system">Системная</option>
+          <option value="dark">Тёмная</option>
+          <option value="light">Светлая</option>
+        </select>
+      </label>
+                      <label class="settings__row">
+          <span>
+            <strong>Язык интерфейса</strong>
+            <small>Русский или English.</small>
+          </span>
+          <select id="setting-language">
+            <option value="ru">Русский</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+        <label class="settings__row">
+          <span>
+            <strong>Частицы на главной</strong>
+            <small>Распад логотипа и надписи Rustle.</small>
+          </span>
+          <input id="setting-particles" type="checkbox" checked>
+        </label>
+        <label class="settings__row settings__row--stack">
+          <span>
+            <strong>Интенсивность частиц</strong>
+            <small id="setting-particles-label">100%</small>
+          </span>
+          <input id="setting-particles-intensity" type="range" min="40" max="200" step="10" value="100">
+        </label>
 <label class="settings__row">
           <span>
             <strong>Ширина боковой панели</strong>
@@ -244,6 +290,86 @@
         </span>
         <input id="setting-adblock" type="checkbox" checked>
       </label>
+      <div class="settings__row">
+        <span>
+          <strong>Фильтры Adblock</strong>
+          <small id="adblock-status">Загрузка…</small>
+        </span>
+        <button id="adblock-update" class="button" type="button">Обновить</button>
+      </div>
+      <label class="settings__row settings__row--stack">
+        <span>
+          <strong>Исключения Adblock</strong>
+          <small>Домены через запятую — реклама на них не блокируется.</small>
+        </span>
+        <textarea class="settings__exceptions" id="setting-adblock-exceptions" rows="2" placeholder="hltv.org"></textarea>
+      </label>
+      <label class="settings__row settings__row--stack">
+        <span>
+          <strong>Свои правила Adblock</strong>
+          <small>По одному правилу на строку. Поддерживаются домены, ||домен^ и @@исключения.</small>
+        </span>
+        <textarea class="settings__exceptions" id="setting-adblock-rules" rows="3" placeholder="||ads.example.com^"></textarea>
+      </label>
+      <label class="settings__row">
+        <span>
+          <strong>Очищать при выходе</strong>
+          <small>Удалять историю, сессию и данные WebView2 после закрытия.</small>
+        </span>
+        <input id="setting-clear-exit" type="checkbox">
+      </label>
+      <div class="settings__row settings__row--stack">
+        <span>
+          <strong>Библиотека сессий</strong>
+          <small>Сохраняйте наборы вкладок с названием и превью.</small>
+        </span>
+        <div class="settings__session-create">
+          <input id="session-name" type="text" placeholder="Название сессии" autocomplete="off">
+          <input id="session-tags" type="text" placeholder="Теги через запятую" autocomplete="off">
+          <button id="session-save" class="button" type="button">Сохранить текущую</button>
+        </div>
+        <input id="session-filter" type="text" placeholder="Поиск по сессиям и тегам" autocomplete="off">
+        <div id="sessions-list" class="sessions-list"></div>
+      </div>
+      <div class="settings__row settings__row--stack">
+        <span>
+          <strong>Журнал блокировок</strong>
+          <small>Последние заблокированные запросы.</small>
+        </span>
+        <div id="blocked-list" class="blocked-list"></div>
+      </div>
+      <label class="settings__row">
+        <span>
+          <strong>Верхняя панель</strong>
+          <small>Компактная строка или классическая с отдельной панелью вкладок.</small>
+        </span>
+        <select id="setting-topbar-style">
+          <option value="compact">Компактная</option>
+          <option value="classic">Классическая</option>
+        </select>
+      </label>
+      <label class="settings__row">
+        <span>
+          <strong>Кнопки окна</strong>
+          <small>Светофор macOS или стандартные кнопки Windows.</small>
+        </span>
+        <select id="setting-window-controls">
+          <option value="traffic">Светофор</option>
+          <option value="standard">Стандартные Windows</option>
+        </select>
+      </label>
+      <div class="settings__row settings__row--stack">
+        <span>
+          <strong>Профили</strong>
+          <small>Отдельные cookie и данные сайтов. PIN — 4 цифры.</small>
+        </span>
+        <label class="profile-ask"><input type="checkbox" id="profile-ask"> Спрашивать профиль при открытии</label>
+        <div class="profile-settings-list" id="profile-settings-list"></div>
+        <div class="profile-create">
+          <input id="profile-name" type="text" placeholder="Название профиля" autocomplete="off">
+          <input id="profile-new-pin" type="password" inputmode="numeric" maxlength="4" placeholder="PIN (необязательно)" autocomplete="off">
+          <button class="button" id="profile-create" type="button">Создать профиль</button>
+        </div>
       </div>
       <button type="submit" hidden aria-hidden="true"></button>
     </form>
