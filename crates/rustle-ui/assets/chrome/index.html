@@ -103,7 +103,7 @@
         <div class="newtab__brand">Rustle</div>
         <canvas class="newtab__particles" id="newtab-particles"></canvas>
       </div>
-      <p class="newtab__tagline">Минималистичный браузер. 0.41.15.</p>
+      <p class="newtab__tagline">Минималистичный браузер. 0.41.17.</p>
 
       <form class="newtab__search" id="newtab-search" role="search">
         <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
@@ -124,7 +124,7 @@
       </div>
     </aside>
     <div class="history-popover" id="history-popover" role="tooltip"></div>
-      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.41.15</span></p>
+      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.41.17</span></p>
     </div>
   </section>
 
@@ -195,8 +195,6 @@
         <button type="button" data-setting-target="setting-startup">При запуске</button>
         <button type="button" data-setting-target="setting-https">HTTPS</button>
         <button type="button" data-setting-target="setting-sidebar-width">Боковая панель</button>
-        <button type="button" data-setting-target="setting-containers">Контейнеры</button>
-        <button type="button" data-setting-target="setting-default-container">Контейнер вкладок</button>
         <button type="button" data-setting-target="setting-adblock">Adblock</button>
         <button type="button" data-setting-target="setting-adblock-exceptions">Исключения</button>
         <button type="button" data-setting-target="setting-adblock-rules">Свои правила</button>
@@ -210,69 +208,6 @@
 
       </nav>
       <form id="settings-form" class="settings">
-      <label class="settings__row">
-        <span>
-          <strong>Поисковик</strong>
-          <small>Используется для запросов из адресной строки.</small>
-        </span>
-        <select id="setting-engine">
-          <option value="ddg">DuckDuckGo</option>
-          <option value="google">Google</option>
-          <option value="yandex">Яндекс</option>
-          <option value="bing">Bing</option>
-        </select>
-      </label>
-      <label class="settings__row">
-        <span>
-          <strong>Тема</strong>
-          <small>Светлая или тёмная оболочка браузера.</small>
-        </span>
-        <select id="setting-theme">
-          <option value="system">Системная</option>
-          <option value="dark">Тёмная</option>
-          <option value="light">Светлая</option>
-        </select>
-      </label>
-                      <label class="settings__row">
-          <span>
-            <strong>Язык интерфейса</strong>
-            <small>Русский или English.</small>
-          </span>
-          <select id="setting-language">
-            <option value="ru">Русский</option>
-            <option value="en">English</option>
-          </select>
-        </label>
-        <label class="settings__row">
-          <span>
-            <strong>Частицы на главной</strong>
-            <small>Распад логотипа и надписи Rustle.</small>
-          </span>
-          <input id="setting-particles" type="checkbox" checked>
-        </label>
-        <label class="settings__row settings__row--stack">
-          <span>
-            <strong>Интенсивность частиц</strong>
-            <small id="setting-particles-label">100%</small>
-          </span>
-          <input id="setting-particles-intensity" type="range" min="40" max="200" step="10" value="100">
-        </label>
-        <label class="settings__row settings__row--stack">
-          <span>
-            <strong>Контейнеры cookie</strong>
-            <small>По одному имени на строку.</small>
-          </span>
-          <textarea class="settings__exceptions" id="setting-containers" rows="3" placeholder="personal&#10;work&#10;bank"></textarea>
-        </label>
-        <label class="settings__row">
-          <span>
-            <strong>Контейнер новых вкладок</strong>
-            <small>Профиль WebView2 для новых вкладок.</small>
-          </span>
-          <select id="setting-default-container">
-            <option value="">Без контейнера</option>
-          </select>
-        </label>
 <label class="settings__row">
           <span>
             <strong>Ширина боковой панели</strong>

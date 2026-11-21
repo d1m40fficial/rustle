@@ -448,9 +448,20 @@
     { url: "https://mail.google.com", title: "Gmail", mark: "GM" },
   ];
 
-  const shortcutsKey = "rustle.shortcuts.v1";
-  const tileOrderKey = "rustle.tiles.order.v1";
-  const tileLabelsKey = "rustle.tiles.labels.v1";
+  const shortcutsBaseKey = "rustle.shortcuts.v1";
+  const tileOrderBaseKey = "rustle.tiles.order.v1";
+  const tileLabelsBaseKey = "rustle.tiles.labels.v1";
+  let tileProfileId = 1;
+  let shortcutsKey = shortcutsBaseKey;
+  let tileOrderKey = tileOrderBaseKey;
+  let tileLabelsKey = tileLabelsBaseKey;
+  const configureTileProfile = (id) => {
+    tileProfileId = Number(id) || 1;
+    const suffix = tileProfileId === 1 ? "" : ".p" + tileProfileId;
+    shortcutsKey = shortcutsBaseKey + suffix;
+    tileOrderKey = tileOrderBaseKey + suffix;
+    tileLabelsKey = tileLabelsBaseKey + suffix;
+  };
   let tileEdit = false;
   const tileFavicons = new Map();
   const tileFaviconRequested = new Set();
@@ -465,11 +476,13 @@
           return parsed;
         }
       }
+      if (tileProfileId !== 1) return [];
       localStorage.setItem(shortcutsKey, JSON.stringify(DEFAULT_SHORTCUTS));
+      return DEFAULT_SHORTCUTS;
     } catch {
       // ignore malformed storage
     }
-    return DEFAULT_SHORTCUTS;
+    return [];
   };
 
   const saveShortcuts = (items) => {
@@ -562,7 +575,7 @@
     const custom = readShortcuts();
     const customUrls = new Set(custom.map((item) => item.url));
     const labels = readTileLabels();
-    const bookmarks = (current.bookmarks || [])
+    const bookmarks = (tileProfileId === 1 ? (current.bookmarks || []) : [])
       .filter((item) => item.url && !customUrls.has(item.url))
       .map((item) => {
         const host = hostForUrl(item.url);
@@ -992,7 +1005,7 @@
     popover.style.left = left + "px";
     popover.style.top = top + "px";
   };
-  const renderStickGroup = (id, items, startIndex = 0, total = 1) => {
+  const renderStickGroup = (id, items, startIndex = 0, total = 1, historyKind = false) => {
     const group = byId(id);
     if (!group) return 0;
     group.replaceChildren();
@@ -1015,6 +1028,8 @@
       stick.addEventListener("click", () => send({ type: "tabs.newUrl", url: item.url }));
       const scale = total > 1 ? (startIndex + count) / (total - 1) : 1;
       stick.style.setProperty("--width-scale", scale.toFixed(3));
+      stick.style.setProperty("--stick-min", historyKind ? "5px" : "10px");
+      stick.style.setProperty("--stick-range", historyKind ? "10px" : "20px");
       group.append(stick);
       count += 1;
     });
@@ -1026,8 +1041,8 @@
     const requestItems = historyItems.slice(0, 12).reverse();
     const tabItems = openTabs.slice(0, 12);
     const total = requestItems.length + tabItems.length;
-    const requests = renderStickGroup("newtab-history-requests", requestItems, 0, total);
-    const tabs = renderStickGroup("newtab-history-tabs", tabItems, requestItems.length, total);
+    const requests = renderStickGroup("newtab-history-requests", requestItems, 0, total, true);
+    const tabs = renderStickGroup("newtab-history-tabs", tabItems, requestItems.length, total, false);
     const divider = panel.querySelector(".stick-divider");
     if (divider) divider.hidden = !(requests && tabs);
     if (!requests && !tabs) {
@@ -1591,6 +1606,7 @@
     }
     const previousActive = current.activeId;
     current = { ...current, ...payload };
+    configureTileProfile(payload.activeProfile || 1);
     const activeChanged = payload.activeId !== previousActive;
     if (activeChanged) {
       closeSuggestions();
@@ -1720,6 +1736,7 @@
     if (Array.isArray(payload.blockedLog)) {
       renderBlockedLog(payload.blockedLog);
     }
+    configureTileProfile(payload.activeProfile || 1);
     renderProfiles();
     if (Array.isArray(payload.sessions)) {
       renderSessions(payload.sessions);
@@ -2978,6 +2995,10 @@
     profileAvatar.addEventListener("click", () => send({ type: "profile.picker" }));
   }
 
+  const profileChip = byId("profile-chip");
+  if (profileChip) {
+    profileChip.addEventListener("click", () => send({ type: "profile.pick" }));
+  }
   const topbarMenu = byId("topbar-menu");
   if (topbarMenu) {
     topbarMenu.addEventListener("click", (event) => {

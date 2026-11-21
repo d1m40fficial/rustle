@@ -2022,7 +2022,7 @@ body.topbar-compact .topbar {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 0 146px 0 8px;
+  padding: 0 190px 0 8px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elevated);
 }
@@ -2496,4 +2496,43 @@ body.switcher-open .switcher-overlay { display: grid !important; }
   background: var(--text);
   transform: scaleX(1.06);
   transform-origin: right center;
+}
+
+.profile-chip {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.profile-chip:hover { filter: brightness(1.12); }
+
+body.topbar-compact .tab {
+  flex: 0 0 150px;
+  width: 150px;
+  min-width: 150px;
+  max-width: 150px;
+}
+
+.history-stick {
+  width: calc(var(--stick-min, 10px) + (var(--stick-range, 20px) * var(--width-scale, 1)));
+}
+.history-stick:hover, .history-stick:focus-visible {
+  width: calc(var(--stick-min, 10px) + (var(--stick-range, 20px) * var(--width-scale, 1))) !important;
+  background: var(--text);
+  transform: scaleX(1.06);
+  transform-origin: right center;
+}
+
+body.topbar-compact .profile-chip {
+  position: absolute;
+  right: 150px;
+  top: 9px;
+  z-index: 8;
 }

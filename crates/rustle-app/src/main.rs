@@ -619,56 +619,95 @@ fn push_tab(state: &mut AppState, url: String, title: String) -> TabId {
     id
 }
 
+fn build_session(state: &AppState, clean_exit: bool) -> Session {
+    let active = state.tab_index(state.active).unwrap_or(0);
+    Session {
+        version: SESSION_VERSION,
+        clean_exit,
+        active,
+        tabs: state
+            .tabs
+            .iter()
+            .map(|tab| SessionTab {
+                url: session_url(&tab.url),
+                title: tab.title.clone(),
+                group: tab.group,
+                pinned: tab.pinned,
+                muted: tab.muted,
+                container: tab.container.clone(),
+            })
+            .collect(),
+        closed: state
+            .closed
+            .iter()
+            .map(|tab| SessionTab {
+                url: session_url(&tab.url),
+                title: tab.title.clone(),
+                group: None,
+                pinned: false,
+                muted: false,
+                container: None,
+            })
+            .collect(),
+        groups: state
+            .groups
+            .iter()
+            .map(|group| SessionGroup {
+                id: group.id,
+                name: group.name.clone(),
+                collapsed: group.collapsed,
+                hue: group.hue,
+            })
+            .collect(),
+    }
+}
+
+fn profile_session_path(id: u64) -> std::path::PathBuf {
+    rustle_storage::data_dir()
+        .join("profile-sessions")
+        .join(format!("{id}.json"))
+}
+
+fn save_profile_session(state: &Rc<RefCell<AppState>>, id: u64) {
+    let session = {
+        let state = state.borrow();
+        if state.private {
+            return;
+        }
+        build_session(&state, false)
+    };
+    let path = profile_session_path(id);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(bytes) = serde_json::to_vec_pretty(&session) {
+        let _ = std::fs::write(path, bytes);
+    }
+}
+
+fn load_profile_session(id: u64) -> Option<Session> {
+    let text = std::fs::read_to_string(profile_session_path(id)).ok()?;
+    serde_json::from_str::<Session>(&text).ok()
+}
+
 fn save_session_state(state: &Rc<RefCell<AppState>>, clean_exit: bool) {
     if state.borrow().private {
         return;
     }
     let session = {
         let state = state.borrow();
-        let active = state.tab_index(state.active).unwrap_or(0);
-        Session {
-            version: SESSION_VERSION,
-            clean_exit,
-            active,
-            tabs: state
-                .tabs
-                .iter()
-                .map(|tab| SessionTab {
-                    url: session_url(&tab.url),
-                    title: tab.title.clone(),
-                    group: tab.group,
-                    pinned: tab.pinned,
-                    muted: tab.muted,
-                    container: tab.container.clone(),
-                })
-                .collect(),
-            closed: state
-                .closed
-                .iter()
-                .map(|tab| SessionTab {
-                    url: session_url(&tab.url),
-                    title: tab.title.clone(),
-                    group: None,
-                    pinned: false,
-                    muted: false,
-                    container: None,
-                })
-                .collect(),
-            groups: state
-                .groups
-                .iter()
-                .map(|group| SessionGroup {
-                    id: group.id,
-                    name: group.name.clone(),
-                    collapsed: group.collapsed,
-                    hue: group.hue,
-                })
-                .collect(),
-        }
+        build_session(&state, clean_exit)
     };
-
+    let active_profile = state.borrow().profiles.active;
     if let Err(error) = rustle_storage::save_session(&session) {
         eprintln!("[session] save failed: {error}");
+    }
+    if let Ok(bytes) = serde_json::to_vec_pretty(&session) {
+        let path = profile_session_path(active_profile);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, bytes);
     }
     state.borrow_mut().last_save = Instant::now();
 }
@@ -3176,6 +3215,10 @@ fn select_profile(state: &Rc<RefCell<AppState>>, id: u64, pin: &str) {
         push_ui_state(state);
         return;
     }
+    let old_profile = state.borrow().profiles.active;
+    if old_profile != id {
+        save_profile_session(state, old_profile);
+    }
     let old_webviews: Vec<WebView> = {
         let mut state_ref = state.borrow_mut();
         state_ref.profiles.active = id;
@@ -3193,7 +3236,17 @@ fn select_profile(state: &Rc<RefCell<AppState>>, id: u64, pin: &str) {
     {
         let mut state_ref = state.borrow_mut();
         state_ref.tabs.clear();
+        state_ref.closed.clear();
+        state_ref.groups.clear();
         state_ref.active = TabId(0);
+    }
+    if let Some(session) = load_profile_session(id) {
+        restore_session(state, Some(session));
+        let active = state.borrow().active;
+        ensure_tab_webview(state, active);
+        apply_layout(state);
+        push_ui_state(state);
+        return;
     }
     new_tab(state);
 }
@@ -5949,6 +6002,16 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             state.borrow_mut().profile_pending = true;
             state.borrow_mut().profile_error.clear();
             apply_layout(state);
+            push_ui_state(state);
+        }
+        Some("profile.pick") => {
+            state.borrow_mut().profile_pending = true;
+            state.borrow_mut().profile_error.clear();
+            push_ui_state(state);
+        }
+        Some("profile.cancel") => {
+            state.borrow_mut().profile_pending = false;
+            state.borrow_mut().profile_error.clear();
             push_ui_state(state);
         }
         Some("profile.select") => {
