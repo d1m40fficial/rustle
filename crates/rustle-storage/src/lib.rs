@@ -65,7 +65,7 @@ pub struct Settings {
     pub particle_intensity: u32,
     #[serde(default = "default_startup")]
     pub startup: String,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub https_first: bool,
     #[serde(default)]
     pub clear_on_exit: bool,
@@ -165,7 +165,7 @@ impl Default for Settings {
             particles_enabled: true,
             particle_intensity: default_particle_intensity(),
             startup: default_startup(),
-            https_first: false,
+            https_first: true,
             clear_on_exit: false,
             adblock: true,
             vertical_tabs: false,

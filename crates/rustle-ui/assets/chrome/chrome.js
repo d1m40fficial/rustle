@@ -1326,6 +1326,10 @@
   };
 
   const showInternalPage = (page) => {
+    const rail = byId("global-settings-rail");
+    const railPages = ["settings", "history", "bookmarks", "about"];
+    if (rail) rail.hidden = !railPages.includes(page);
+    document.documentElement.classList.toggle("settings-rail-open", railPages.includes(page));
     document.querySelectorAll(".internal-page").forEach((section) => {
       section.hidden = section.dataset.page !== page;
     });
@@ -3033,7 +3037,15 @@
     "Автосон вкладок": "setting-auto-suspend",
     "Библиотека сессий": "setting-sessions",
   };
+  const mountSettingsRail = () => {
+    const rail = byId("global-settings-rail");
+    const nav = document.querySelector("#page-settings .settings-nav");
+    if (rail && nav) {
+      if (!rail.contains(nav)) rail.append(nav);
+    }
+  };
   const initSettingsNav = () => {
+    mountSettingsRail();
     document.querySelectorAll("#settings-form .settings__row").forEach((row) => {
       const strong = row.querySelector("strong");
       const id = strong && settingsSectionMap[strong.textContent.trim()];
@@ -3044,7 +3056,14 @@
     document.querySelectorAll("[data-setting-target]").forEach((button) => {
       button.addEventListener("click", () => {
         const target = document.getElementById(button.dataset.settingTarget);
-        if (target) target.scrollIntoView({ block: "start", behavior: "smooth" });
+        if (target) {
+          target.scrollIntoView({ block: "start", behavior: "smooth" });
+        } else {
+          send({ type: "nav.go", url: "rustle://settings" });
+          window.setTimeout(() => {
+            document.getElementById(button.dataset.settingTarget)?.scrollIntoView({ block: "start", behavior: "smooth" });
+          }, 180);
+        }
       });
     });
   };

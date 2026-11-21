@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="chrome.css">
 </head>
 <body>
+  <aside class="global-settings-rail" id="global-settings-rail" hidden></aside>
   <div class="topbar" id="topbar">
   <div class="toolbar" role="toolbar" aria-label="Навигация">
     <button class="profile-avatar" id="profile-avatar" type="button" title="Профиль" aria-label="Профиль">
@@ -107,7 +108,7 @@
         <div class="newtab__brand">Rustle</div>
         <canvas class="newtab__particles" id="newtab-particles"></canvas>
       </div>
-      <p class="newtab__tagline">Минималистичный браузер. 0.41.19.</p>
+      <p class="newtab__tagline">Минималистичный браузер. 0.41.21.</p>
 
       <form class="newtab__search" id="newtab-search" role="search">
         <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
@@ -128,7 +129,7 @@
       </div>
     </aside>
     <div class="history-popover" id="history-popover" role="tooltip"></div>
-      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.41.19</span></p>
+      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.41.21</span></p>
     </div>
   </section>
 
@@ -233,14 +234,14 @@
           <strong>HTTPS-first</strong>
           <small>Пробовать HTTPS для HTTP-адресов, кроме localhost.</small>
         </span>
-        <input id="setting-https" type="checkbox">
+        <input id="setting-https" type="checkbox" checked>
       </label>
       <label class="settings__row">
         <span>
           <strong>Блокировка рекламы</strong>
           <small>Полноценный Adblock: EasyList, EasyPrivacy и RU AdList, сетевые и косметические фильтры.</small>
         </span>
-        <input id="setting-adblock" type="checkbox">
+        <input id="setting-adblock" type="checkbox" checked>
       </label>
       </div>
       <button type="submit" hidden aria-hidden="true"></button>

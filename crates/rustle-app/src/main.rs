@@ -763,6 +763,9 @@ fn restore_session(state: &Rc<RefCell<AppState>>, session: Option<Session>) {
                 entry.group = if tab.pinned { None } else { group };
             }
         }
+        let used_groups: std::collections::HashSet<u64> =
+            state.tabs.iter().filter_map(|tab| tab.group).collect();
+        state.groups.retain(|group| used_groups.contains(&group.id));
         let active_index = session.active.min(state.tabs.len().saturating_sub(1));
         let active_id = state.tabs[active_index].id;
         state.tabs.sort_by_key(|tab| !tab.pinned);
@@ -1267,43 +1270,10 @@ mod native_menu {
                 "Язык: English"
             },
         );
-        push_checked(
-            items,
-            "app.toolbar.translate",
-            "Переводчик",
-            !state
-                .settings
-                .toolbar_hidden
-                .iter()
-                .any(|item| item == "translate"),
-        );
-        push_checked(
-            items,
-            "app.toolbar.downloads",
-            "Загрузки",
-            !state
-                .settings
-                .toolbar_hidden
-                .iter()
-                .any(|item| item == "downloads"),
-        );
-        push_checked(
-            items,
-            "app.toolbar.theme",
-            "Тема панели",
-            !state
-                .settings
-                .toolbar_hidden
-                .iter()
-                .any(|item| item == "theme"),
-        );
         separator(items);
-        push_checked(
-            items,
-            "app.vertical",
-            "Вертикальные вкладки",
-            state.vertical,
-        );
+        push(items, "app.translate", "Переводчик");
+        push(items, "app.downloads", "Загрузки");
+        push(items, "app.vertical", "Вертикальные вкладки");
     }
 
     fn app_items(state: &AppState, items: &mut Vec<Entry>) {
@@ -1369,20 +1339,6 @@ mod native_menu {
                                 &mut entries,
                                 &format!("tab.pin:{}", id.0),
                                 "Закрепить вкладку",
-                            );
-                        }
-                        push_checked(
-                            &mut entries,
-                            &format!("tab.container:{}:none", id.0),
-                            "Без контейнера",
-                            tab.container.is_none(),
-                        );
-                        for container in &state.settings.containers {
-                            push_checked(
-                                &mut entries,
-                                &format!("tab.container:{}:{}", id.0, container),
-                                container,
-                                tab.container.as_deref() == Some(container.as_str()),
                             );
                         }
                         separator(&mut entries);
@@ -1551,7 +1507,8 @@ mod native_menu {
         let quick = action.starts_with("app.theme")
             || action.starts_with("app.zoom")
             || action.starts_with("app.language")
-            || action.starts_with("app.toolbar")
+            || action == "app.translate"
+            || action == "app.downloads"
             || action == "app.vertical"
             || action == "app.settings";
         if quick {

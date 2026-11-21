@@ -2565,3 +2565,25 @@ body.topbar-compact .tab--pinned .tab__title { display: none; }
   transform: scaleX(1.08);
   transform-origin: right center;
 }
+
+.global-settings-rail {
+  position: fixed;
+  left: 0;
+  top: 44px;
+  bottom: 0;
+  width: 220px;
+  padding: 16px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg-elevated);
+  z-index: 50;
+}
+.global-settings-rail[hidden] { display: none; }
+.global-settings-rail .settings-nav {
+  position: static;
+  max-height: none;
+  border: 0;
+  padding: 0;
+}
+html.settings-rail-open .internal-page { padding-left: 252px; }
+.settings-layout { display: block; max-width: 720px; margin: 0; }
