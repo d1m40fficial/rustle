@@ -3066,7 +3066,13 @@
     };
     const target = findTarget();
     if (target) {
-      target.scrollIntoView({ block: "start", behavior: "smooth" });
+      const page = target.closest(".internal-page");
+      if (page) {
+        const top = target.getBoundingClientRect().top - page.getBoundingClientRect().top + page.scrollTop - 12;
+        page.scrollTo({ top, behavior: "smooth" });
+      } else {
+        target.scrollIntoView({ block: "start", behavior: "smooth" });
+      }
     } else {
       send({ type: "nav.go", url: "rustle://settings" });
       window.setTimeout(() => findTarget()?.scrollIntoView({ block: "start", behavior: "smooth" }), 220);
