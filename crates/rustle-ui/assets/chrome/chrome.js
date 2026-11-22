@@ -2556,8 +2556,6 @@
           language: byId("setting-language")?.value || "ru",
           startup: byId("setting-startup").value,
           autoSuspendMinutes: Number(byId("setting-auto-suspend")?.value || 30),
-          windowControls: byId("setting-window-controls")?.value || "standard",
-          topbarStyle: byId("setting-topbar-style")?.value || "compact",
           httpsFirst: byId("setting-https").checked,
           clearOnExit: byId("setting-clear-exit").checked,
           adblock: byId("setting-adblock").checked,

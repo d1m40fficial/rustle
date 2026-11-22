@@ -209,6 +209,7 @@ fn mark(label: &str) {
 
 enum AppEvent {
     OpenUrl(String),
+    OpenTab(String),
     StorageResponse { request_id: u64, payload: Value },
     DownloadsChanged,
     DownloadsRestored(Vec<DownloadRecord>),
@@ -1092,7 +1093,7 @@ fn raise_sidebar(state: &Rc<RefCell<AppState>>) {
 #[cfg(target_os = "windows")]
 mod native_menu {
     use super::{AppState, TabId};
-    use crate::{AppEvent, apply_zoom, open_tab, push_ui_state, zoom_active};
+    use crate::{AppEvent, apply_zoom, push_ui_state, zoom_active};
     use std::cell::RefCell;
     use std::rc::Rc;
     use tao::platform::windows::WindowExtWindows;
@@ -1570,10 +1571,15 @@ mod native_menu {
                     push_ui_state(state);
                 }
                 "app.translate" => {
-                    open_tab(state, "https://translate.google.com/".to_owned());
+                    let _ = state.borrow().proxy.send_event(AppEvent::OpenTab(
+                        "https://translate.google.com/".to_owned(),
+                    ));
                 }
                 "app.downloads" => {
-                    open_tab(state, "rustle://downloads".to_owned());
+                    let _ = state
+                        .borrow()
+                        .proxy
+                        .send_event(AppEvent::OpenTab("rustle://downloads".to_owned()));
                 }
                 "app.vertical" => {
                     let enabled = !state.borrow().vertical;
@@ -7611,6 +7617,9 @@ fn main() -> wry::Result<()> {
             },
             Event::UserEvent(AppEvent::OpenUrl(url)) => {
                 open_external_url(&state, &url);
+            }
+            Event::UserEvent(AppEvent::OpenTab(url)) => {
+                open_tab(&state, url);
             }
             Event::UserEvent(AppEvent::LayoutTick) => {
                 apply_layout(&state);
