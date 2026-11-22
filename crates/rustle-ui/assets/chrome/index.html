@@ -108,7 +108,7 @@
         <div class="newtab__brand">Rustle</div>
         <canvas class="newtab__particles" id="newtab-particles"></canvas>
       </div>
-      <p class="newtab__tagline">Минималистичный браузер. 0.41.27.</p>
+      <p class="newtab__tagline">Минималистичный браузер. 0.42.0.</p>
 
       <form class="newtab__search" id="newtab-search" role="search">
         <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
@@ -129,7 +129,7 @@
       </div>
     </aside>
     <div class="history-popover" id="history-popover" role="tooltip"></div>
-      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.41.27</span></p>
+      <p class="newtab__hint">Вкладки, история, закладки и настройки уже работают. <span class="newtab__version" id="about" title="Версия">0.42.0</span></p>
     </div>
   </section>
 
@@ -191,19 +191,15 @@
         <button type="button" data-setting-target="setting-engine">Поисковик</button>
         <button type="button" data-setting-target="setting-theme">Тема</button>
         <button type="button" data-setting-target="setting-language">Язык</button>
-        <button type="button" data-setting-target="setting-particles">Частицы</button>
         <button type="button" data-setting-target="setting-startup">При запуске</button>
         <button type="button" data-setting-target="setting-https">HTTPS</button>
-        <button type="button" data-setting-target="setting-sidebar-width">Боковая панель</button>
         <button type="button" data-setting-target="setting-adblock">Adblock</button>
         <button type="button" data-setting-target="setting-adblock-exceptions">Исключения</button>
         <button type="button" data-setting-target="setting-adblock-rules">Свои правила</button>
-        <button type="button" data-setting-target="setting-blocked-log">Журнал блокировок</button>
         <button type="button" data-setting-target="setting-profiles">Профили</button>
         <button type="button" data-setting-target="setting-topbar-style">Верхняя панель</button>
         <button type="button" data-setting-target="setting-window-controls">Кнопки окна</button>
         <button type="button" data-setting-target="setting-auto-suspend">Автосон</button>
-        <button type="button" data-setting-target="setting-sessions">Сессии</button>
 
         <div class="settings-nav__actions">
           <button id="clear-data" class="button" type="button">Очистить cookies и кэш</button>
@@ -245,27 +241,6 @@
             <option value="ru">Русский</option>
             <option value="en">English</option>
           </select>
-        </label>
-        <label class="settings__row">
-          <span>
-            <strong>Частицы на главной</strong>
-            <small>Распад логотипа и надписи Rustle.</small>
-          </span>
-          <input id="setting-particles" type="checkbox" checked>
-        </label>
-        <label class="settings__row settings__row--stack">
-          <span>
-            <strong>Интенсивность частиц</strong>
-            <small id="setting-particles-label">100%</small>
-          </span>
-          <input id="setting-particles-intensity" type="range" min="40" max="200" step="10" value="100">
-        </label>
-<label class="settings__row">
-          <span>
-            <strong>Ширина боковой панели</strong>
-            <small id="setting-sidebar-width-label">282 px</small>
-          </span>
-          <input id="setting-sidebar-width" type="range" min="72" max="282" step="1" value="282">
         </label>
 <label class="settings__row">
         <span>
@@ -319,26 +294,8 @@
         </span>
         <input id="setting-clear-exit" type="checkbox">
       </label>
-      <div class="settings__row settings__row--stack">
-        <span>
-          <strong>Библиотека сессий</strong>
-          <small>Сохраняйте наборы вкладок с названием и превью.</small>
-        </span>
-        <div class="settings__session-create">
-          <input id="session-name" type="text" placeholder="Название сессии" autocomplete="off">
-          <input id="session-tags" type="text" placeholder="Теги через запятую" autocomplete="off">
-          <button id="session-save" class="button" type="button">Сохранить текущую</button>
-        </div>
-        <input id="session-filter" type="text" placeholder="Поиск по сессиям и тегам" autocomplete="off">
-        <div id="sessions-list" class="sessions-list"></div>
-      </div>
-      <div class="settings__row settings__row--stack">
-        <span>
-          <strong>Журнал блокировок</strong>
-          <small>Последние заблокированные запросы.</small>
-        </span>
-        <div id="blocked-list" class="blocked-list"></div>
-      </div>
+      
+      
       <label class="settings__row">
         <span>
           <strong>Верхняя панель</strong>
