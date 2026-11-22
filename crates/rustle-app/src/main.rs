@@ -1092,7 +1092,7 @@ fn raise_sidebar(state: &Rc<RefCell<AppState>>) {
 #[cfg(target_os = "windows")]
 mod native_menu {
     use super::{AppState, TabId};
-    use crate::{AppEvent, apply_zoom, push_ui_state, zoom_active};
+    use crate::{AppEvent, apply_zoom, open_tab, push_ui_state, zoom_active};
     use std::cell::RefCell;
     use std::rc::Rc;
     use tao::platform::windows::WindowExtWindows;
@@ -1569,6 +1569,12 @@ mod native_menu {
                     state.borrow_mut().settings = settings;
                     push_ui_state(state);
                 }
+                "app.translate" => {
+                    open_tab(state, "https://translate.google.com/".to_owned());
+                }
+                "app.downloads" => {
+                    open_tab(state, "rustle://downloads".to_owned());
+                }
                 "app.vertical" => {
                     let enabled = !state.borrow().vertical;
                     let _ = state.borrow().proxy.send_event(AppEvent::Vertical(enabled));
@@ -1688,6 +1694,24 @@ fn apply_rounded_window_region(window: &Window) {
         let region = CreateRoundRectRgn(0, 0, width + 1, height + 1, radius, radius);
         if region != 0 {
             SetWindowRgn(hwnd, region, 1);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn SetClassLongPtrW(hwnd: isize, index: i32, value: isize) -> isize;
+}
+
+#[cfg(target_os = "windows")]
+fn set_dark_window_background(window: &Window) {
+    const GCLP_HBRBACKGROUND: i32 = -10;
+    const COLOR: u32 = 0x001E1E1E;
+    unsafe {
+        let brush = CreateSolidBrush(COLOR);
+        if brush != 0 {
+            let _ = SetClassLongPtrW(window.hwnd(), GCLP_HBRBACKGROUND, brush);
         }
     }
 }
@@ -2076,6 +2100,7 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
     let new_window_proxy = proxy.clone();
 
     let builder = WebViewBuilder::new_with_web_context(&mut context)
+        .with_background_color((30, 30, 30, 255))
         .with_bounds(rect(
             0,
             top,
@@ -6433,6 +6458,7 @@ fn create_sidebar(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
         .expect("WebContext must exist while creating sidebar");
     let ipc_state = Rc::clone(state);
     let result = WebViewBuilder::new_with_web_context(&mut context)
+        .with_background_color((30, 30, 30, 255))
         .with_bounds(rect(0, 0, sidebar_width, height))
         .with_browser_accelerator_keys(false)
         .with_additional_browser_args(webview_browser_args())
@@ -6472,6 +6498,7 @@ fn create_chrome(state: &Rc<RefCell<AppState>>) -> wry::Result<()> {
 
     let ipc_state = Rc::clone(state);
     let result = WebViewBuilder::new_with_web_context(&mut context)
+        .with_background_color((30, 30, 30, 255))
         .with_bounds(rect(0, 0, width, CHROME_COLLAPSED))
         .with_browser_accelerator_keys(false)
         .with_additional_browser_args(webview_browser_args())
@@ -7360,6 +7387,8 @@ fn main() -> wry::Result<()> {
             .expect("create window"),
     );
     window.set_undecorated_shadow(false);
+    #[cfg(target_os = "windows")]
+    set_dark_window_background(&window);
     #[cfg(target_os = "windows")]
     {
         let border_color = 34u32;

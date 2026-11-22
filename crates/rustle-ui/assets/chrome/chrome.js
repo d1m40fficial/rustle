@@ -2525,6 +2525,19 @@
       });
     }
 
+    const topbarStyleSelect = byId("setting-topbar-style");
+    if (topbarStyleSelect) {
+      topbarStyleSelect.addEventListener("change", () => {
+        send({ type: "settings.save", topbarStyle: topbarStyleSelect.value });
+      });
+    }
+    const windowControlsSelect = byId("setting-window-controls");
+    if (windowControlsSelect) {
+      windowControlsSelect.addEventListener("change", () => {
+        send({ type: "settings.save", windowControls: windowControlsSelect.value });
+      });
+    }
+
     const settingsForm = byId("settings-form");
     if (settingsForm) {
       let settingsSaveTimer = 0;
