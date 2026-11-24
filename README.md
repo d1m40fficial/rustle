@@ -101,7 +101,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## Планы
 
-См. [docs/PLAN.md](docs/PLAN.md) и [docs/ROADMAP.md](docs/ROADMAP.md): IPC/UI-тесты, полный ABP-синтаксис, очередь загрузок, редактор хоткеев, tree-tabs, split-screen, расширения и синхронизация.
+См. [docs/PLAN.md](docs/PLAN.md) и [docs/ROADMAP.md](docs/ROADMAP.md): миграция на Obscura, замена renderer на Servo, параллельный конвейер, memory governor, совместимость и fallback на WebView2.
 
 ## Лицензия
 
