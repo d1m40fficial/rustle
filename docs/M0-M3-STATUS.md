@@ -142,3 +142,37 @@
 - память ограничена количеством процессов, не байтовым budget;
 - нет p95 input latency и top-1000 parity;
 - WebRender scene/raster и decode вне UI-потока ещё не настраиваются из Rustle.
+
+## M6. Hardening
+
+Сделано:
+
+- автоматический WebView2 fallback, если Servo не найден или не стартовал;
+- crash log в %LOCALAPPDATA%\Rustle\crashes.log;
+- отдельный процесс на Servo-вкладку и LRU-выгрузка;
+- CI: fmt, clippy, test, release build;
+- миграция профилей и настроек без потери данных.
+
+Ограничения:
+
+- телеметрия не отправляется;
+- нет отдельного sandbox-профиля и site isolation за пределами процесса вкладки;
+- security review не завершён.
+
+## M7. Rustle 1.0
+
+Сделано:
+
+- версия 1.0.0;
+- Servo входит в portable/setup;
+- Servo выбран движком по умолчанию;
+- WebView2 fallback при отсутствии/падении Servo;
+- документация Known Issues в release notes;
+- публичные артефакты setup/portable.
+
+Известные ограничения 1.0:
+
+- Servo-вкладки перезапускаются при смене URL/back/forward;
+- максимум 3 живых Servo-процесса;
+- favicon/точный title Servo ограничены;
+- нет top-1000 parity и p95 input latency.

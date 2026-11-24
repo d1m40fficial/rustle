@@ -190,6 +190,24 @@ pub fn ensure(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: &str, visible: 
     enforce_budget(windows, active, 650.0);
 }
 
+pub fn available() -> bool {
+    locate_binary().is_some()
+}
+
+pub fn ensure_with_fallback(
+    state: &Rc<RefCell<AppState>>,
+    tab_id: TabId,
+    url: &str,
+    visible: bool,
+) -> bool {
+    ensure(state, tab_id, url, visible);
+    WINDOWS
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|windows| windows.contains_key(&tab_id)))
+        .unwrap_or(false)
+}
+
 pub fn navigate(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: &str, visible: bool) {
     close(tab_id);
     ensure(state, tab_id, url, visible);

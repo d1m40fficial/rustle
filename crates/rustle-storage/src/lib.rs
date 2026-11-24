@@ -134,7 +134,7 @@ fn default_true() -> bool {
 }
 
 fn default_engine() -> String {
-    "webview2".to_owned()
+    "servo".to_owned()
 }
 
 fn default_topbar_style() -> String {

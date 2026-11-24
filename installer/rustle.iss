@@ -1,5 +1,5 @@
 #define MyAppName "Rustle"
-#define MyAppVersion "0.42.0"
+#define MyAppVersion "1.0.0"
 #define MyAppPublisher "Rustle"
 #define MyAppExeName "rustle.exe"
 #define WebView2Client "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
@@ -40,6 +40,7 @@ Source: "..\target\release\rustle.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\target\release\WebView2Loader.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\tools\servo\bin\servo\*"; DestDir: "{app}\tools\servo\bin\servo"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\Rustle"; Filename: "{app}\rustle.exe"

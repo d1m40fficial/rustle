@@ -14,7 +14,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     fs,
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::Command as ProcessCommand,
     rc::Rc,
@@ -628,7 +628,11 @@ fn push_tab(state: &mut AppState, url: String, title: String) -> TabId {
     state.next_tab_id += 1;
     let mut tab = Tab::new(id, url, title);
     tab.container = state.settings.default_container.clone();
-    tab.engine = state.settings.engine.clone();
+    tab.engine = if state.settings.engine == "servo" && !servo_view::available() {
+        "webview2".to_owned()
+    } else {
+        state.settings.engine.clone()
+    };
     state.tabs.push(tab);
     id
 }
@@ -2126,7 +2130,17 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
             let url = tab.url.clone();
             let has_history = !tab.servo_history.is_empty();
             drop(state_ref);
-            servo_view::ensure(state, tab_id, &url, visible);
+            if !servo_view::ensure_with_fallback(state, tab_id, &url, visible) {
+                if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+                    tab.engine = "webview2".to_owned();
+                    tab.error = Some(ErrorInfo {
+                        code: "engine".to_owned(),
+                        message: "Servo недоступен, включён WebView2 fallback.".to_owned(),
+                    });
+                }
+                ensure_tab_webview(state, tab_id);
+                return;
+            }
             if !has_history {
                 if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
                     tab.servo_history = vec![url.clone()];
@@ -7566,7 +7580,28 @@ fn webview2_runtime_installed() -> bool {
     true
 }
 
+fn install_crash_logger() {
+    std::panic::set_hook(Box::new(|info| {
+        let path = rustle_storage::data_dir().join("crashes.log");
+        let _ = std::fs::create_dir_all(rustle_storage::data_dir());
+        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let _ = writeln!(
+                file,
+                "{} panic: {} at {}:{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|value| value.as_secs())
+                    .unwrap_or(0),
+                info,
+                info.location().map(|location| location.file()).unwrap_or("?"),
+                info.location().map(|location| location.line()).unwrap_or(0),
+            );
+        }
+    }));
+}
+
 fn main() -> wry::Result<()> {
+    install_crash_logger();
     START.get_or_init(Instant::now);
     mark("process");
 

@@ -20,6 +20,10 @@ if (Test-Path "target\release\WebView2Loader.dll") {
 }
 Copy-Item "LICENSE" $portable
 Copy-Item "README.md" $portable
+if (Test-Path "tools/servo/bin/servo") {
+    New-Item -ItemType Directory -Force "$portable/tools/servo/bin" | Out-Null
+    Copy-Item "tools/servo/bin/servo" "$portable/tools/servo/bin/servo" -Recurse
+}
 
 $zip = Join-Path $dist "Rustle-$Version-portable.zip"
 Remove-Item $zip -Force -ErrorAction SilentlyContinue
