@@ -11,6 +11,7 @@ Thumbs.db
 
 /notes/
 /tools/obscura/bin/
+/tools/obscura/stealth-bin/
 /tools/obscura/*.zip
 /tools/servo/bin/
 /tools/servo/*.zip

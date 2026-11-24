@@ -35,6 +35,7 @@ impl ObscuraServer {
             .arg(port.to_string())
             .arg("--workers")
             .arg("1")
+            .arg("--stealth")
             .current_dir(workdir)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
