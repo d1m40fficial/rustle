@@ -5,8 +5,20 @@
 //! safe path to Servo without embedding the full browser engine into the UI
 //! process yet.
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+fn hidden_command(binary: &Path) -> Command {
+    let mut command = Command::new(binary);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -50,7 +62,7 @@ impl StaticRenderer for ServoStaticRenderer {
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
-        let mut child = Command::new(&self.binary)
+        let mut child = hidden_command(&self.binary)
             .arg("-z")
             .arg("-x")
             .arg("-o")

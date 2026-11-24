@@ -15,6 +15,7 @@ adblock.workspace = true
 rfd = "0.15"
 rustle-core.workspace = true
 rustle-obscura.workspace = true
+rustle-servo.workspace = true
 base64 = "0.22"
 serde.workspace = true
 rustle-storage.workspace = true

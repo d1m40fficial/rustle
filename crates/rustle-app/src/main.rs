@@ -5,6 +5,7 @@
 
 mod adblock;
 mod obscura_view;
+mod servo_view;
 mod single_instance;
 mod storage_worker;
 
@@ -1879,6 +1880,8 @@ fn apply_layout(state: &Rc<RefCell<AppState>>) {
         }
     }
     #[cfg(target_os = "windows")]
+    servo_view::layout(state);
+    #[cfg(target_os = "windows")]
     {
         let window = state.borrow().window.clone();
         apply_rounded_window_region(&window);
@@ -2107,6 +2110,21 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
     if state.borrow().profile_pending {
         return;
     }
+    {
+        let state_ref = state.borrow();
+        let Some(tab) = state_ref.tab(tab_id) else {
+            return;
+        };
+        if tab.engine == "servo"
+            && (tab.url.starts_with("http://") || tab.url.starts_with("https://"))
+        {
+            let visible = tab.id == state_ref.active;
+            let url = tab.url.clone();
+            drop(state_ref);
+            servo_view::ensure(state, tab_id, &url, visible);
+            return;
+        }
+    }
     let (mut url, visible, width, height, top, window, proxy, container, profile_id, engine) = {
         let state = state.borrow();
         let Some(tab) = state.tab(tab_id) else {
@@ -2322,6 +2340,25 @@ fn navigate_active(state: &Rc<RefCell<AppState>>, input: &str) {
     let native = state.borrow().tab(active).is_some_and(|tab| {
         tab.engine == "obscura" && (url.starts_with("http://") || url.starts_with("https://"))
     });
+    let servo = state.borrow().tab(active).is_some_and(|tab| {
+        tab.engine == "servo" && (url.starts_with("http://") || url.starts_with("https://"))
+    });
+    if servo {
+        {
+            let mut state_ref = state.borrow_mut();
+            let Some(tab) = state_ref.tab_mut(active) else {
+                return;
+            };
+            tab.url = url.clone();
+            tab.title = fallback_title(&url);
+            tab.loading = false;
+            tab.error = None;
+        }
+        servo_view::navigate(state, active, &url, true);
+        push_ui_state(state);
+        save_session_state(state, false);
+        return;
+    }
     if native {
         {
             let mut state_ref = state.borrow_mut();
@@ -2437,6 +2474,10 @@ fn reload_active(state: &Rc<RefCell<AppState>>) {
     }
     if engine == "obscura" {
         obscura_view::native_reload(state, active);
+        return;
+    }
+    if engine == "servo" {
+        servo_view::reload(state, active);
         return;
     }
     if !has_webview || overlay {
@@ -2867,6 +2908,7 @@ fn activate_tab(state: &Rc<RefCell<AppState>>, id: TabId) {
         return;
     }
 
+    servo_view::set_visible(previous, false);
     {
         let state = state.borrow();
         if let Some(webview) = state.tab(previous).and_then(|tab| tab.webview.as_ref()) {
@@ -2907,6 +2949,7 @@ fn close_tab(state: &Rc<RefCell<AppState>>, id: TabId) {
     };
 
     obscura_view::native_close(id);
+    servo_view::close(id);
     let removed = {
         let mut state = state.borrow_mut();
         state.tabs.remove(index)
@@ -6526,7 +6569,7 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
                 }
             }
             if let Some(value) = message.get("engine").and_then(|value| value.as_str()) {
-                if matches!(value, "webview2" | "obscura") {
+                if matches!(value, "webview2" | "obscura" | "servo") {
                     settings.engine = value.to_owned();
                 }
             }

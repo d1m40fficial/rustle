@@ -5,7 +5,19 @@
 //! in-process Obscura core later without changing the viewer.
 
 use std::net::TcpStream;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::process::{Child, Command, Stdio};
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+fn hidden_command(binary: &std::path::Path) -> Command {
+    let mut command = Command::new(binary);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -29,7 +41,7 @@ impl ObscuraServer {
             .parent()
             .map(std::path::Path::to_path_buf)
             .unwrap_or_default();
-        let mut child = Command::new(binary)
+        let mut child = hidden_command(binary)
             .arg("serve")
             .arg("--port")
             .arg(port.to_string())

@@ -7,8 +7,20 @@
 
 pub mod cdp;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+fn hidden_command(binary: &Path) -> Command {
+    let mut command = Command::new(binary);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -39,7 +51,7 @@ impl ObscuraRenderer {
 
     pub fn capture_text(&self, request: &RenderRequest) -> Result<String, RendererError> {
         request.validate()?;
-        let mut command = Command::new(&self.binary);
+        let mut command = hidden_command(&self.binary);
         command
             .arg("fetch")
             .arg(&request.url)
@@ -64,7 +76,7 @@ impl ObscuraRenderer {
         request.validate()?;
         let output_path = temp_png_path("obscura");
         let timeout = Duration::from_millis(request.timeout_ms);
-        let mut child = Command::new(&self.binary)
+        let mut child = hidden_command(&self.binary)
             .arg("fetch")
             .arg(&request.url)
             .arg("--screenshot")

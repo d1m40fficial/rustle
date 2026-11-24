@@ -2469,6 +2469,7 @@ dependencies = [
  "rfd",
  "rustle-core",
  "rustle-obscura",
+ "rustle-servo",
  "rustle-storage",
  "rustle-ui",
  "serde",
