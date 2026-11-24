@@ -2472,6 +2472,14 @@ fn stop_active(state: &Rc<RefCell<AppState>>) {
 
 fn go_back_active(state: &Rc<RefCell<AppState>>) {
     let active = state.borrow().active;
+    if state
+        .borrow()
+        .tab(active)
+        .is_some_and(|tab| tab.engine == "obscura")
+    {
+        obscura_view::native_back(state, active);
+        return;
+    }
     let overlay_return = {
         let state = state.borrow();
         let Some(tab) = state.tab(active) else {
@@ -2545,6 +2553,14 @@ fn go_back_active(state: &Rc<RefCell<AppState>>) {
 
 fn go_forward_active(state: &Rc<RefCell<AppState>>) {
     let active = state.borrow().active;
+    if state
+        .borrow()
+        .tab(active)
+        .is_some_and(|tab| tab.engine == "obscura")
+    {
+        obscura_view::native_forward(state, active);
+        return;
+    }
     if state
         .borrow()
         .tab(active)

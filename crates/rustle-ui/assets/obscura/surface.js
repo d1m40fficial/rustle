@@ -35,4 +35,7 @@
     }
   });
   send({ type: "obscura.surface.ready" });
+  window.setInterval(function () {
+    send({ type: "obscura.surface.tick" });
+  }, 900);
 })();

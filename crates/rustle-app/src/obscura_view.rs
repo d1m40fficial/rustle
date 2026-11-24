@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use rustle_obscura::ObscuraRenderer;
 use rustle_obscura::cdp::ObscuraServer;
 
-use crate::AppState;
+use crate::{AppState, push_ui_state};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -501,6 +501,130 @@ pub fn native_navigate(state: &Rc<RefCell<AppState>>, tab_id: crate::TabId, url:
     }
 }
 
+fn native_history(
+    bridge: &mut NativeBridge,
+    session: &str,
+) -> Result<(Vec<(i64, String)>, usize), String> {
+    let value = bridge
+        .server
+        .client
+        .command("Page.getNavigationHistory", json!({}), Some(session))
+        .map_err(|error| error.to_string())?;
+    let current = value
+        .get("currentIndex")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let entries = value
+        .get("entries")
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    Some((
+                        entry.get("id").and_then(Value::as_i64)?,
+                        entry.get("url").and_then(Value::as_str)?.to_owned(),
+                    ))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Ok((entries, current))
+}
+
+fn apply_history_flags(
+    state: &Rc<RefCell<AppState>>,
+    tab_id: crate::TabId,
+    entries: &[(i64, String)],
+    current: usize,
+) {
+    let url = entries.get(current).map(|(_, url)| url.clone());
+    if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+        tab.can_back = current > 0;
+        tab.can_forward = current + 1 < entries.len();
+        if let Some(url) = url {
+            tab.url = url;
+        }
+    }
+}
+
+pub fn native_back(state: &Rc<RefCell<AppState>>, tab_id: crate::TabId) -> bool {
+    let mut guard = match native_bridge() {
+        Ok(guard) => guard,
+        Err(_) => return false,
+    };
+    let Some(bridge) = guard.as_mut() else {
+        return false;
+    };
+    let Some(tab) = bridge.tabs.get(&tab_id.0) else {
+        return false;
+    };
+    let session = tab.session.clone();
+    let Ok((entries, current)) = native_history(bridge, &session) else {
+        return false;
+    };
+    if current == 0 {
+        return false;
+    }
+    let Some((entry_id, _)) = entries.get(current - 1) else {
+        return false;
+    };
+    let _ = bridge.server.client.command(
+        "Page.navigateToHistoryEntry",
+        json!({"entryId": entry_id}),
+        Some(&session),
+    );
+    std::thread::sleep(Duration::from_millis(700));
+    let png = bridge.server.client.screenshot(&session).ok();
+    let Ok((entries, current)) = native_history(bridge, &session) else {
+        return false;
+    };
+    apply_history_flags(state, tab_id, &entries, current);
+    drop(guard);
+    if let Some(png) = png {
+        send_native_frame(state, tab_id, &png, "back");
+    }
+    push_ui_state(state);
+    true
+}
+
+pub fn native_forward(state: &Rc<RefCell<AppState>>, tab_id: crate::TabId) -> bool {
+    let mut guard = match native_bridge() {
+        Ok(guard) => guard,
+        Err(_) => return false,
+    };
+    let Some(bridge) = guard.as_mut() else {
+        return false;
+    };
+    let Some(tab) = bridge.tabs.get(&tab_id.0) else {
+        return false;
+    };
+    let session = tab.session.clone();
+    let Ok((entries, current)) = native_history(bridge, &session) else {
+        return false;
+    };
+    let Some((entry_id, _)) = entries.get(current + 1) else {
+        return false;
+    };
+    let _ = bridge.server.client.command(
+        "Page.navigateToHistoryEntry",
+        json!({"entryId": entry_id}),
+        Some(&session),
+    );
+    std::thread::sleep(Duration::from_millis(700));
+    let png = bridge.server.client.screenshot(&session).ok();
+    let Ok((entries, current)) = native_history(bridge, &session) else {
+        return false;
+    };
+    apply_history_flags(state, tab_id, &entries, current);
+    drop(guard);
+    if let Some(png) = png {
+        send_native_frame(state, tab_id, &png, "forward");
+    }
+    push_ui_state(state);
+    true
+}
+
 pub fn native_activate(state: &Rc<RefCell<AppState>>, tab_id: crate::TabId) {
     let mut guard = match native_bridge() {
         Ok(guard) => guard,
@@ -572,6 +696,7 @@ pub fn native_handle(state: &Rc<RefCell<AppState>>, tab_id: crate::TabId, messag
     match kind {
         "obscura.surface.ready" => native_activate(state, tab_id),
         "obscura.surface.reload" => native_reload(state, tab_id),
+        "obscura.surface.tick" => native_activate(state, tab_id),
         "obscura.surface.click" => {
             let x = message.get("x").and_then(Value::as_f64).unwrap_or(0.0);
             let y = message.get("y").and_then(Value::as_f64).unwrap_or(0.0);
