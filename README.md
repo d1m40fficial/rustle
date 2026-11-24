@@ -103,7 +103,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 См. [docs/PLAN.md](docs/PLAN.md), [docs/ROADMAP.md](docs/ROADMAP.md) и [docs/M0-M3-STATUS.md](docs/M0-M3-STATUS.md): миграция на Obscura, замена renderer на Servo, параллельный конвейер, memory governor, совместимость и fallback на WebView2.
 
-Экспериментальный CDP-мост Obscura доступен из быстрого меню: **Obscura (CDP, экспериментально)**. Это отдельный viewer с вкладками и профильными browser-контекстами, пока не нативные вкладки Rustle.
+Экспериментальный CDP-мост Obscura доступен в настройках: **Движок новых вкладок → Obscura (CDP)**. Каждая новая вкладка Rustle получает собственный Obscura Target; адресная строка, переключение и закрытие вкладок работают нативно.
 
 ## Лицензия
 
