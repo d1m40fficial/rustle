@@ -5,6 +5,8 @@
 //! crash without taking Rustle down. A later milestone can replace this adapter
 //! with the in-process browser core behind the same interface.
 
+pub mod cdp;
+
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;

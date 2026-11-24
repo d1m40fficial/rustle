@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Obscura CDP</title>
+  <link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+  <header class="ob-bar">
+    <div class="ob-tabs" id="ob-tabs"></div>
+    <button class="ob-icon" id="ob-new" type="button" title="Новая вкладка">+</button>
+    <input id="ob-address" class="ob-address" type="text" placeholder="Адрес или поиск" spellcheck="false" autocomplete="off">
+    <button class="ob-icon" id="ob-go" type="button" title="Перейти">→</button>
+    <select id="ob-profile" class="ob-profile" title="Профиль"></select>
+    <button class="ob-icon" id="ob-reload" type="button" title="Обновить">↻</button>
+  </header>
+  <main class="ob-main">
+    <img id="ob-screen" class="ob-screen" alt="">
+    <div id="ob-status" class="ob-status">Подключение к Obscura…</div>
+  </main>
+  <script src="viewer.js"></script>
+</body>
+</html>

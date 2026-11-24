@@ -44,23 +44,33 @@
 
 Ограничение: это sidecar, а не встроенное browser core. Следующий шаг — CDP-сессия и вкладки внутри Rustle UI.
 
-## M2. Obscura alpha
+## M2. Obscura alpha (CDP-мост)
 
-В работе. Уже есть:
+Сделано:
 
-- процессный adapter;
-- статический capture;
-- изолированный таймаут.
+- запуск Obscura serve на свободном порту;
+- ожидание /json/version и WebSocket CDP;
+- Target.createTarget / attachToTarget;
+- Page.enable / navigate / reload;
+- screenshot через Page.captureScreenshot;
+- Input.dispatchMouseEvent и dispatchKeyEvent;
+- браузерные контексты Obscura для профилей;
+- вкладки внутри экспериментальной страницы Rustle;
+- переключение профиля и создание вкладки в контексте профиля;
+- opt-in пункт меню: Obscura (CDP, экспериментально);
+- просмотр страницы как PNG-поверхности и клики по координатам.
 
-Ещё нет:
+Ограничения текущего alpha:
 
-- интерактивных вкладок через Obscura;
-- профилей/cookie-store внутри Obscura;
-- back/forward и истории;
-- Adblock на NetworkService;
-- opt-in переключателя в UI.
+- это отдельная экспериментальная страница, а не нативные вкладки Rustle;
+- нет back/forward, истории и Adblock на NetworkService;
+- нет live-compositor и аппаратного ввода;
+- скриншот обновляется после команд, а не потоком;
+- контексты профилей живут в памяти процесса.
 
-Без этих пунктов нельзя считать M2 завершённым.
+Это уже рабочий CDP-мост: Obscura запускается, создаёт Target/Page-сессии, вкладки и профильные контексты, а Rustle отображает и управляет ими через экспериментальный viewer.
+
+[Скриншот viewer](assets/engines/obscura-viewer.png)
 
 ## M3. Servo static renderer
 

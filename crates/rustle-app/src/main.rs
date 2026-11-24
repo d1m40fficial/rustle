@@ -4,6 +4,7 @@
 //! Rustle desktop browser.
 
 mod adblock;
+mod obscura_view;
 mod single_instance;
 mod storage_worker;
 
@@ -82,6 +83,7 @@ const SIDEBAR_WIDTH: u32 = 282;
 const SIDEBAR_COLLAPSED: u32 = 56;
 const CHROME_URL: &str = "rustle://localhost/chrome/index.html";
 const NEWTAB_URL: &str = "rustle://localhost/newtab/index.html";
+const OBSCURA_VIEW_URL: &str = "rustle://localhost/obscura/index.html";
 
 const LOADING_OVERLAY_JS: &str = r#"(function(){
   var id = "rustle-loading-overlay";
@@ -521,6 +523,8 @@ fn canonicalize_internal(url: String) -> String {
     let trimmed = url.trim_end_matches('/');
     if trimmed == "rustle://newtab" || url.contains("rustle.localhost/newtab") {
         NEWTAB_URL.to_owned()
+    } else if trimmed == "rustle://obscura" || url.contains("rustle.localhost/obscura") {
+        OBSCURA_VIEW_URL.to_owned()
     } else if let Some(page) = internal_page(&url) {
         format!("rustle://{page}")
     } else {
@@ -1274,6 +1278,7 @@ mod native_menu {
         separator(items);
         push(items, "app.translate", "Переводчик");
         push(items, "app.downloads", "Загрузки");
+        push(items, "app.obscura", "Obscura (CDP, экспериментально)");
         push(items, "app.vertical", "Вертикальные вкладки");
     }
 
@@ -1510,6 +1515,7 @@ mod native_menu {
             || action.starts_with("app.language")
             || action == "app.translate"
             || action == "app.downloads"
+            || action == "app.obscura"
             || action == "app.vertical"
             || action == "app.settings";
         if quick {
@@ -1580,6 +1586,11 @@ mod native_menu {
                         .borrow()
                         .proxy
                         .send_event(AppEvent::OpenTab("rustle://downloads".to_owned()));
+                }
+                "app.obscura" => {
+                    let _ = state.borrow().proxy.send_event(AppEvent::OpenTab(
+                        "rustle://localhost/obscura/index.html".to_owned(),
+                    ));
                 }
                 "app.vertical" => {
                     let enabled = !state.borrow().vertical;
@@ -7654,6 +7665,9 @@ fn main() -> wry::Result<()> {
             Event::UserEvent(AppEvent::ContentIpc(tab_id, body)) => {
                 if let Ok(message) = serde_json::from_str::<Value>(&body) {
                     match message.get("type").and_then(Value::as_str) {
+                        Some(kind) if kind.starts_with("obscura.") => {
+                            obscura_view::handle(tab_id, &message, &state);
+                        }
                         Some("zoom.wheel") => {
                             let delta =
                                 message.get("delta").and_then(Value::as_f64).unwrap_or(0.0);

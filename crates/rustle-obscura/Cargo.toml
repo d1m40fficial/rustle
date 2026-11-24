@@ -8,3 +8,12 @@ repository.workspace = true
 
 [dependencies]
 rustle-engine = { path = "../rustle-engine" }
+serde_json.workspace = true
+ureq = { version = "2.12", features = ["tls"] }
+tungstenite = { version = "0.24", features = ["handshake", "url"] }
+base64 = "0.22"
+
+
+[[bin]]
+name = "obscura-cdp-probe"
+path = "src/bin/probe.rs"

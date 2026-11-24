@@ -1,0 +1,17 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; background: #1e1e1e; color: #e6e6e6; font: 12px system-ui, sans-serif; }
+.ob-bar { height: 40px; display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-bottom: 1px solid #333; background: #252525; }
+.ob-tabs { display: flex; gap: 2px; min-width: 0; overflow-x: auto; }
+.ob-tab { height: 28px; max-width: 180px; padding: 0 8px; border: 0; border-radius: 6px; background: #303030; color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.ob-tab.active { background: #3d3d3d; color: #fff; }
+.ob-close { width: 18px; height: 18px; margin-left: 4px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #999; cursor: pointer; }
+.ob-close:hover { background: #555; color: #fff; }
+.ob-icon { width: 28px; height: 28px; flex: 0 0 28px; border: 0; border-radius: 6px; background: transparent; color: #ddd; font-size: 16px; cursor: pointer; }
+.ob-icon:hover { background: #383838; }
+.ob-address { flex: 1; min-width: 80px; height: 28px; padding: 0 10px; border: 1px solid #3a3a3a; border-radius: 14px; background: #1d1d1d; color: #eee; outline: none; }
+.ob-address:focus { border-color: #d58a57; }
+.ob-profile { height: 28px; max-width: 130px; border: 1px solid #3a3a3a; border-radius: 14px; background: #1d1d1d; color: #eee; padding: 0 8px; }
+.ob-main { position: relative; height: calc(100% - 40px); overflow: auto; background: #111; }
+.ob-screen { display: block; max-width: 100%; margin: 0 auto; background: #fff; cursor: crosshair; }
+.ob-status { position: fixed; left: 12px; bottom: 12px; padding: 6px 10px; border-radius: 8px; background: rgba(20,20,20,.82); color: #bbb; pointer-events: none; }
