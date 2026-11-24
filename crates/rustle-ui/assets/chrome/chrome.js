@@ -1636,6 +1636,10 @@
     document.body.classList.toggle("window-controls-standard", windowControlsStyle === "standard");
     const topbarStyle = payload.settings?.topbarStyle || "compact";
     document.body.classList.toggle("topbar-compact", topbarStyle === "compact");
+    document.body.classList.toggle(
+      "obscura-engine",
+      payload.engine === "obscura" || payload.settings?.engine === "obscura",
+    );
     const addressInput = byId("address");
     if (addressInput && topbarStyle === "compact" && !addressInput.value) {
       addressInput.placeholder = document.activeElement === addressInput ? "Поиск или адрес" : "Поиск";
@@ -1773,6 +1777,10 @@
       document.documentElement.classList.remove("settings-rail-open");
     }
 
+    const backButton = byId("back");
+    if (backButton) backButton.disabled = !payload.canBack;
+    const forwardButton = byId("forward");
+    if (forwardButton) forwardButton.disabled = !payload.canForward;
     const reload = byId("reload");
     reload.dataset.cmd = loading ? "nav.stop" : error ? "nav.retry" : "nav.reload";
     reload.title = loading ? "Остановить" : error ? "Повторить" : "Обновить (F5)";

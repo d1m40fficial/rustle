@@ -2610,3 +2610,8 @@ html.settings-rail-open .internal-page { padding-left: 252px; }
 .history-stick:hover::before, .history-stick:focus-visible::before {
   background: var(--text);
 }
+
+body.topbar-compact.obscura-engine #back,
+body.topbar-compact.obscura-engine #forward {
+  display: inline-flex;
+}
