@@ -19,6 +19,7 @@ struct ServoWindow {
     hwnd: isize,
     url: String,
     visible: bool,
+    last_active: Instant,
 }
 
 static WINDOWS: Mutex<Option<HashMap<TabId, ServoWindow>>> = Mutex::new(None);
@@ -95,9 +96,14 @@ pub fn ensure(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: &str, visible: 
         .join("servo-profiles")
         .join(profile.to_string());
     let _ = std::fs::create_dir_all(&profile_dir);
+    let layout_threads = std::thread::available_parallelism()
+        .map(|count| (count.get() / 2).clamp(1, 8))
+        .unwrap_or(2);
     let mut command = Command::new(&binary);
     command
         .arg("-b")
+        .arg("--layout-threads")
+        .arg(layout_threads.to_string())
         .arg("--config-dir")
         .arg(&profile_dir)
         .arg(url)
@@ -153,6 +159,7 @@ pub fn ensure(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: &str, visible: 
             hwnd,
             url: url.to_owned(),
             visible,
+            last_active: Instant::now(),
         },
     );
     if let Some(title) = window_title(hwnd) {
@@ -160,6 +167,8 @@ pub fn ensure(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: &str, visible: 
             tab.title = title;
         }
     }
+    let active = state.borrow().active;
+    trim_inactive(windows, active);
 }
 
 pub fn navigate(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: &str, visible: bool) {
@@ -187,6 +196,9 @@ pub fn set_visible(tab_id: TabId, visible: bool) {
     };
     if let Some(window) = windows.get_mut(&tab_id) {
         window.visible = visible;
+        if visible {
+            window.last_active = Instant::now();
+        }
         unsafe {
             ShowWindow(window.hwnd, if visible { SW_SHOW } else { SW_HIDE });
         }
@@ -228,6 +240,23 @@ pub fn layout(state: &Rc<RefCell<AppState>>) {
     for (tab, window) in windows.iter_mut() {
         let visible = *tab == active && window.visible;
         resize(window.hwnd, top, width as i32, height as i32, visible);
+    }
+}
+
+fn trim_inactive(windows: &mut HashMap<TabId, ServoWindow>, active: TabId) {
+    const MAX_SERVO_TABS: usize = 6;
+    while windows.len() > MAX_SERVO_TABS {
+        let candidate = windows
+            .iter()
+            .filter(|(id, window)| **id != active && !window.visible)
+            .min_by_key(|(_, window)| window.last_active)
+            .map(|(id, _)| *id);
+        let Some(id) = candidate else {
+            break;
+        };
+        if let Some(mut window) = windows.remove(&id) {
+            close_window(&mut window);
+        }
     }
 }
 
