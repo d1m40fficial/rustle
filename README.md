@@ -101,7 +101,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## Планы
 
-См. [docs/PLAN.md](docs/PLAN.md) и [docs/ROADMAP.md](docs/ROADMAP.md): миграция на Obscura, замена renderer на Servo, параллельный конвейер, memory governor, совместимость и fallback на WebView2.
+См. [docs/PLAN.md](docs/PLAN.md), [docs/ROADMAP.md](docs/ROADMAP.md) и [docs/M0-M3-STATUS.md](docs/M0-M3-STATUS.md): миграция на Obscura, замена renderer на Servo, параллельный конвейер, memory governor, совместимость и fallback на WebView2.
 
 ## Лицензия
 

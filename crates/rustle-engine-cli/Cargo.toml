@@ -1,0 +1,17 @@
+[package]
+name = "rustle-engine-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "rustle-capture"
+path = "src/main.rs"
+
+[dependencies]
+rustle-engine = { path = "../rustle-engine" }
+rustle-obscura = { path = "../rustle-obscura" }
+rustle-servo = { path = "../rustle-servo" }
+serde_json.workspace = true

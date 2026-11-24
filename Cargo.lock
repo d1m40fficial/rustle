@@ -2446,8 +2446,32 @@ name = "rustle-engine"
 version = "0.42.0"
 
 [[package]]
+name = "rustle-engine-cli"
+version = "0.42.0"
+dependencies = [
+ "rustle-engine",
+ "rustle-obscura",
+ "rustle-servo",
+ "serde_json",
+]
+
+[[package]]
+name = "rustle-obscura"
+version = "0.42.0"
+dependencies = [
+ "rustle-engine",
+]
+
+[[package]]
 name = "rustle-platform"
 version = "0.42.0"
+
+[[package]]
+name = "rustle-servo"
+version = "0.42.0"
+dependencies = [
+ "rustle-engine",
+]
 
 [[package]]
 name = "rustle-storage"

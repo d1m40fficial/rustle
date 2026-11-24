@@ -4,6 +4,9 @@ members = [
     "crates/rustle-app",
     "crates/rustle-core",
     "crates/rustle-engine",
+    "crates/rustle-obscura",
+    "crates/rustle-servo",
+    "crates/rustle-engine-cli",
     "crates/rustle-platform",
     "crates/rustle-storage",
     "crates/rustle-ui",
@@ -27,6 +30,9 @@ windows-core = "0.62"
 wry = { version = "0.57", features = ["devtools"] }
 webview2-com = "0.39"
 rustle-core = { path = "crates/rustle-core" }
+rustle-engine = { path = "crates/rustle-engine" }
+rustle-obscura = { path = "crates/rustle-obscura" }
+rustle-servo = { path = "crates/rustle-servo" }
 rustle-storage = { path = "crates/rustle-storage" }
 rustle-ui = { path = "crates/rustle-ui" }
 

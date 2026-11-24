@@ -1,0 +1,14 @@
+{
+  "obscura": {
+    "version": "0.2.7",
+    "url": "https://github.com/h4ckf0r0day/obscura/releases/download/v0.2.7/obscura-x86_64-windows.zip",
+    "binary": "tools/obscura/bin/obscura.exe",
+    "license": "Apache-2.0"
+  },
+  "servo": {
+    "version": "0.8.0",
+    "url": "https://github.com/servo/servo/releases/download/v0.8.0/servo-x86_64-windows-msvc.zip",
+    "binary": "tools/servo/bin/servo/servoshell.exe",
+    "license": "MPL-2.0"
+  }
+}

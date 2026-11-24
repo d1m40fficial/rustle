@@ -10,3 +10,8 @@ Thumbs.db
 .env
 
 /notes/
+/tools/obscura/bin/
+/tools/obscura/*.zip
+/tools/servo/bin/
+/tools/servo/*.zip
+/bench-out/
