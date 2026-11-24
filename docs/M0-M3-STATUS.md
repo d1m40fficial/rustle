@@ -73,7 +73,7 @@
 - профильные контексты живут в памяти процесса;
 - сложные сайты могут отличаться от WebView2.
 
-[Скриншот нативной вкладки](assets/engines/obscura-native-tab.png)
+[Скриншот нативных вкладок](assets/engines/obscura-native-tabs.png)
 
 ## M3. Servo static renderer
 
