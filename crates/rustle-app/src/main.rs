@@ -84,6 +84,7 @@ const SIDEBAR_COLLAPSED: u32 = 56;
 const CHROME_URL: &str = "rustle://localhost/chrome/index.html";
 const NEWTAB_URL: &str = "rustle://localhost/newtab/index.html";
 const OBSCURA_VIEW_URL: &str = "rustle://localhost/obscura/index.html";
+const OBSCURA_SURFACE_URL: &str = "rustle://localhost/obscura/surface.html";
 
 const LOADING_OVERLAY_JS: &str = r#"(function(){
   var id = "rustle-loading-overlay";
@@ -265,6 +266,7 @@ struct Tab {
     pinned: bool,
     muted: bool,
     container: Option<String>,
+    engine: String,
     blocked: u64,
     cosmetic_generic: bool,
     cosmetic_exceptions: HashSet<String>,
@@ -301,6 +303,7 @@ impl Tab {
             pinned: false,
             muted: false,
             container: None,
+            engine: "webview2".to_owned(),
             blocked: 0,
             cosmetic_generic: true,
             cosmetic_exceptions: HashSet::new(),
@@ -620,6 +623,7 @@ fn push_tab(state: &mut AppState, url: String, title: String) -> TabId {
     state.next_tab_id += 1;
     let mut tab = Tab::new(id, url, title);
     tab.container = state.settings.default_container.clone();
+    tab.engine = state.settings.engine.clone();
     state.tabs.push(tab);
     id
 }
@@ -921,6 +925,7 @@ fn push_ui_state(state: &Rc<RefCell<AppState>>) {
                 "toolbarHidden": state.settings.toolbar_hidden,
                 "windowControls": state.settings.window_controls,
                 "topbarStyle": state.settings.topbar_style,
+                "engine": state.settings.engine,
             },
             "adblockStatus": state.adblock_info.to_json(),
             "blockedLog": state.blocked_log,
@@ -1010,11 +1015,19 @@ fn sync_tab_from_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
 
     let mut state = state.borrow_mut();
     if let Some(tab) = state.tab_mut(tab_id) {
-        if tab.error.is_none() {
+        if tab.error.is_none() && tab.engine != "obscura" {
             tab.url = snapshot.0;
         }
-        tab.can_back = snapshot.1;
-        tab.can_forward = snapshot.2;
+        tab.can_back = if tab.engine == "obscura" {
+            false
+        } else {
+            snapshot.1
+        };
+        tab.can_forward = if tab.engine == "obscura" {
+            false
+        } else {
+            snapshot.2
+        };
     }
 }
 
@@ -1923,6 +1936,9 @@ fn focus_active_content(state: &Rc<RefCell<AppState>>) {
 }
 
 fn on_navigation(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: String) {
+    if url.contains("obscura/surface.html") {
+        return;
+    }
     let collapse = {
         let mut state = state.borrow_mut();
         let active = state.active;
@@ -1970,6 +1986,13 @@ fn record_visit(state: &Rc<RefCell<AppState>>, url: &str, title: &str) {
 }
 
 fn on_title(state: &Rc<RefCell<AppState>>, tab_id: TabId, title: String) {
+    if state
+        .borrow()
+        .tab(tab_id)
+        .is_some_and(|tab| tab.engine == "obscura")
+    {
+        return;
+    }
     let recorded = {
         let mut state = state.borrow_mut();
         let Some(tab) = state.tab_mut(tab_id) else {
@@ -2081,7 +2104,7 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
     if state.borrow().profile_pending {
         return;
     }
-    let (url, visible, width, height, top, window, proxy, container, profile_id) = {
+    let (mut url, visible, width, height, top, window, proxy, container, profile_id, engine) = {
         let state = state.borrow();
         let Some(tab) = state.tab(tab_id) else {
             return;
@@ -2103,9 +2126,14 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
             state.proxy.clone(),
             tab.container.clone(),
             state.profiles.active,
+            tab.engine.clone(),
         )
     };
 
+    let native_url = url.clone();
+    if engine == "obscura" && (url.starts_with("http://") || url.starts_with("https://")) {
+        url = OBSCURA_SURFACE_URL.to_owned();
+    }
     let Some(mut context) = state.borrow_mut().context.take() else {
         eprintln!("[tabs] WebContext is missing");
         return;
@@ -2238,6 +2266,17 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
             apply_webview_muted(webview, tab.muted);
         }
     }
+    if engine == "obscura"
+        && (native_url.starts_with("http://") || native_url.starts_with("https://"))
+    {
+        obscura_view::native_ensure(state, tab_id, &native_url, profile_id);
+        if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+            tab.url = native_url;
+            if tab.title.is_empty() {
+                tab.title = fallback_title(&tab.url);
+            }
+        }
+    }
 
     {
         let state_ref = state.borrow();
@@ -2277,6 +2316,29 @@ fn navigate_active(state: &Rc<RefCell<AppState>>, input: &str) {
     };
 
     let active = state.borrow().active;
+    let native = state.borrow().tab(active).is_some_and(|tab| {
+        tab.engine == "obscura" && (url.starts_with("http://") || url.starts_with("https://"))
+    });
+    if native {
+        {
+            let mut state_ref = state.borrow_mut();
+            let Some(tab) = state_ref.tab_mut(active) else {
+                return;
+            };
+            tab.url = url.clone();
+            tab.title = fallback_title(&url);
+            tab.loading = true;
+            tab.error = None;
+        }
+        ensure_tab_webview(state, active);
+        obscura_view::native_navigate(state, active, &url);
+        if let Some(tab) = state.borrow_mut().tab_mut(active) {
+            tab.loading = false;
+        }
+        push_ui_state(state);
+        save_session_state(state, false);
+        return;
+    }
     let (previous_url, previous_title) = {
         let state = state.borrow();
         let Some(tab) = state.tab(active) else {
@@ -2349,7 +2411,7 @@ fn navigate_active(state: &Rc<RefCell<AppState>>, input: &str) {
 
 fn reload_active(state: &Rc<RefCell<AppState>>) {
     let active = state.borrow().active;
-    let (url, error, has_webview, overlay) = {
+    let (url, error, has_webview, overlay, engine) = {
         let state = state.borrow();
         let Some(tab) = state.tab(active) else {
             return;
@@ -2359,6 +2421,7 @@ fn reload_active(state: &Rc<RefCell<AppState>>) {
             tab.error.is_some(),
             tab.webview.is_some(),
             is_overlay_url(&tab.url),
+            tab.engine.clone(),
         )
     };
 
@@ -2367,6 +2430,10 @@ fn reload_active(state: &Rc<RefCell<AppState>>) {
             tab.retry_count = 0;
         }
         navigate_active(state, &url);
+        return;
+    }
+    if engine == "obscura" {
+        obscura_view::native_reload(state, active);
         return;
     }
     if !has_webview || overlay {
@@ -2766,6 +2833,13 @@ fn activate_tab(state: &Rc<RefCell<AppState>>, id: TabId) {
     let previous = state.borrow().active;
     if previous == id {
         ensure_tab_webview(state, id);
+        if state
+            .borrow()
+            .tab(id)
+            .is_some_and(|tab| tab.engine == "obscura")
+        {
+            obscura_view::native_activate(state, id);
+        }
         #[cfg(target_os = "windows")]
         apply_tab_memory_levels(state);
         apply_layout(state);
@@ -2789,6 +2863,13 @@ fn activate_tab(state: &Rc<RefCell<AppState>>, id: TabId) {
         }
     }
     ensure_tab_webview(state, id);
+    if state
+        .borrow()
+        .tab(id)
+        .is_some_and(|tab| tab.engine == "obscura")
+    {
+        obscura_view::native_activate(state, id);
+    }
     #[cfg(target_os = "windows")]
     apply_tab_memory_levels(state);
     apply_layout(state);
@@ -2806,6 +2887,7 @@ fn close_tab(state: &Rc<RefCell<AppState>>, id: TabId) {
         (index, state.active == id)
     };
 
+    obscura_view::native_close(id);
     let removed = {
         let mut state = state.borrow_mut();
         state.tabs.remove(index)
@@ -6422,6 +6504,11 @@ fn handle_ipc(state: &Rc<RefCell<AppState>>, body: &str) {
             if let Some(value) = message.get("topbarStyle").and_then(|value| value.as_str()) {
                 if matches!(value, "classic" | "compact") {
                     settings.topbar_style = value.to_owned();
+                }
+            }
+            if let Some(value) = message.get("engine").and_then(|value| value.as_str()) {
+                if matches!(value, "webview2" | "obscura") {
+                    settings.engine = value.to_owned();
                 }
             }
             if let Some(values) = message

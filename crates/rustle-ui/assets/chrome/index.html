@@ -193,6 +193,7 @@
         <button type="button" data-setting-target="setting-language">Язык</button>
         <button type="button" data-setting-target="setting-startup">При запуске</button>
         <button type="button" data-setting-target="setting-https">HTTPS</button>
+        <button type="button" data-setting-target="setting-engine-backend">Движок</button>
         <button type="button" data-setting-target="setting-adblock">Adblock</button>
         <button type="button" data-setting-target="setting-adblock-exceptions">Исключения</button>
         <button type="button" data-setting-target="setting-adblock-rules">Свои правила</button>
@@ -250,6 +251,16 @@
         <select id="setting-startup">
           <option value="restore">Восстанавливать вкладки</option>
           <option value="newtab">Открывать новую вкладку</option>
+        </select>
+      </label>
+      <label class="settings__row">
+        <span>
+          <strong>Движок новых вкладок</strong>
+          <small>WebView2 или экспериментальный Obscura CDP.</small>
+        </span>
+        <select id="setting-engine-backend">
+          <option value="webview2">WebView2</option>
+          <option value="obscura">Obscura (CDP)</option>
         </select>
       </label>
       <label class="settings__row">

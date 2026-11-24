@@ -101,6 +101,8 @@ pub struct Settings {
     pub window_controls: String,
     #[serde(default = "default_topbar_style")]
     pub topbar_style: String,
+    #[serde(default = "default_engine")]
+    pub engine: String,
 }
 
 fn default_search_engine() -> String {
@@ -129,6 +131,10 @@ fn default_startup() -> String {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_engine() -> String {
+    "webview2".to_owned()
 }
 
 fn default_topbar_style() -> String {
@@ -183,6 +189,7 @@ impl Default for Settings {
             toolbar_hidden: Vec::new(),
             window_controls: default_window_controls(),
             topbar_style: default_topbar_style(),
+            engine: default_engine(),
         }
     }
 }

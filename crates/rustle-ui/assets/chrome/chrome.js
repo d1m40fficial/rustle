@@ -1205,6 +1205,10 @@
     if (topbarSelect) {
       topbarSelect.value = settings.topbarStyle || "compact";
     }
+    const engineBackend = byId("setting-engine-backend");
+    if (engineBackend) {
+      engineBackend.value = settings.engine || "webview2";
+    }
     const toolbarHidden = settings.toolbarHidden || [];
     const setToolbarToggle = (id, key) => {
       const node = byId(id);
@@ -2537,6 +2541,12 @@
         send({ type: "settings.save", windowControls: windowControlsSelect.value });
       });
     }
+    const engineBackendSelect = byId("setting-engine-backend");
+    if (engineBackendSelect) {
+      engineBackendSelect.addEventListener("change", () => {
+        send({ type: "settings.save", engine: engineBackendSelect.value });
+      });
+    }
 
     const settingsForm = byId("settings-form");
     if (settingsForm) {
@@ -3046,6 +3056,7 @@
     "Частицы на главной": "setting-particles",
     "При запуске": "setting-startup",
     "HTTPS-first": "setting-https",
+    "Движок новых вкладок": "setting-engine-backend",
     "Ширина боковой панели": "setting-sidebar-width",
     "Контейнеры cookie": "setting-containers",
     "Контейнер новых вкладок": "setting-default-container",

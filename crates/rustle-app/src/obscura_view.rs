@@ -37,6 +37,10 @@ pub fn handle(tab_id: crate::TabId, message: &Value, state: &Rc<RefCell<AppState
     if !kind.starts_with("obscura.") {
         return;
     }
+    if kind.starts_with("obscura.surface.") {
+        native_handle(state, tab_id, message);
+        return;
+    }
     let mut guard = match BRIDGE.lock() {
         Ok(guard) => guard,
         Err(_) => return,
@@ -351,4 +355,311 @@ fn send_error(state: &Rc<RefCell<AppState>>, tab_id: crate::TabId, error: &str) 
     let payload =
         json!({"error": error, "tabs": [], "profiles": [], "screenshot": "", "status": error});
     send_update(state, tab_id, payload);
+}
+
+// Native-tab bridge: one Obscura Target per Rustle tab.
+// The content WebView of an Obscura tab loads surface.html. This module keeps
+// the target/session in sync with the native tab and pushes PNG frames back.
+
+struct NativeTab {
+    target: String,
+    session: String,
+    url: String,
+}
+
+struct NativeBridge {
+    server: ObscuraServer,
+    tabs: HashMap<u64, NativeTab>,
+    contexts: HashMap<u64, String>,
+}
+
+static NATIVE: Mutex<Option<NativeBridge>> = Mutex::new(None);
+
+fn native_bridge() -> Result<std::sync::MutexGuard<'static, Option<NativeBridge>>, String> {
+    NATIVE
+        .lock()
+        .map_err(|_| "native bridge lock poisoned".to_owned())
+}
+
+fn start_native() -> Result<NativeBridge, String> {
+    let renderer = ObscuraRenderer::locate().map_err(|error| error.to_string())?;
+    let server = ObscuraServer::start(renderer.binary()).map_err(|error| error.to_string())?;
+    Ok(NativeBridge {
+        server,
+        tabs: HashMap::new(),
+        contexts: HashMap::new(),
+    })
+}
+
+pub fn native_ensure(state: &Rc<RefCell<AppState>>, tab_id: crate::TabId, url: &str, profile: u64) {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return;
+    }
+    let mut guard = match native_bridge() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+    if guard.is_none() {
+        match start_native() {
+            Ok(bridge) => *guard = Some(bridge),
+            Err(error) => {
+                drop(guard);
+                send_native_error(state, tab_id, &error);
+                return;
+            }
+        }
+    }
+    let Some(bridge) = guard.as_mut() else {
+        return;
+    };
+    if bridge.tabs.contains_key(&tab_id.0) {
+        return;
+    }
+    let context = match bridge.contexts.get(&profile).cloned() {
+        Some(context) => context,
+        None => match bridge.server.client.create_context() {
+            Ok(context) => {
+                bridge.contexts.insert(profile, context.clone());
+                context
+            }
+            Err(error) => {
+                drop(guard);
+                send_native_error(state, tab_id, &error.to_string());
+                return;
+            }
+        },
+    };
+    let target = match bridge
+        .server
+        .client
+        .create_target("about:blank", Some(&context))
+    {
+        Ok(target) => target,
+        Err(error) => {
+            drop(guard);
+            send_native_error(state, tab_id, &error.to_string());
+            return;
+        }
+    };
+    let session = match bridge.server.client.attach(&target) {
+        Ok(session) => session,
+        Err(error) => {
+            drop(guard);
+            send_native_error(state, tab_id, &error.to_string());
+            return;
+        }
+    };
+    let _ = bridge
+        .server
+        .client
+        .command("Page.enable", json!({}), Some(&session));
+    let _ = bridge
+        .server
+        .client
+        .command("Page.navigate", json!({"url": url}), Some(&session));
+    bridge.tabs.insert(
+        tab_id.0,
+        NativeTab {
+            target,
+            session,
+            url: url.to_owned(),
+        },
+    );
+    std::thread::sleep(Duration::from_millis(900));
+    let png = bridge
+        .tabs
+        .get(&tab_id.0)
+        .and_then(|tab| bridge.server.client.screenshot(&tab.session).ok());
+    drop(guard);
+    if let Some(png) = png {
+        send_native_frame(state, tab_id, &png, url);
+    }
+}
+
+pub fn native_navigate(state: &Rc<RefCell<AppState>>, tab_id: crate::TabId, url: &str) {
+    let mut guard = match native_bridge() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+    let Some(bridge) = guard.as_mut() else {
+        return;
+    };
+    let Some(tab) = bridge.tabs.get_mut(&tab_id.0) else {
+        return;
+    };
+    tab.url = url.to_owned();
+    let session = tab.session.clone();
+    let _ = bridge
+        .server
+        .client
+        .command("Page.navigate", json!({"url": url}), Some(&session));
+    std::thread::sleep(Duration::from_millis(900));
+    let png = bridge.server.client.screenshot(&session).ok();
+    drop(guard);
+    if let Some(png) = png {
+        send_native_frame(state, tab_id, &png, url);
+    }
+}
+
+pub fn native_activate(state: &Rc<RefCell<AppState>>, tab_id: crate::TabId) {
+    let mut guard = match native_bridge() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+    let Some(bridge) = guard.as_mut() else {
+        return;
+    };
+    let Some(tab) = bridge.tabs.get(&tab_id.0) else {
+        return;
+    };
+    let session = tab.session.clone();
+    let url = tab.url.clone();
+    let _ = bridge.server.client.command(
+        "Target.activateTarget",
+        json!({"targetId": tab.target}),
+        None,
+    );
+    let png = bridge.server.client.screenshot(&session).ok();
+    drop(guard);
+    if let Some(png) = png {
+        send_native_frame(state, tab_id, &png, &url);
+    }
+}
+
+pub fn native_reload(state: &Rc<RefCell<AppState>>, tab_id: crate::TabId) {
+    let mut guard = match native_bridge() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+    let Some(bridge) = guard.as_mut() else {
+        return;
+    };
+    let Some(tab) = bridge.tabs.get(&tab_id.0) else {
+        return;
+    };
+    let session = tab.session.clone();
+    let url = tab.url.clone();
+    let _ = bridge
+        .server
+        .client
+        .command("Page.reload", json!({}), Some(&session));
+    std::thread::sleep(Duration::from_millis(700));
+    let png = bridge.server.client.screenshot(&session).ok();
+    drop(guard);
+    if let Some(png) = png {
+        send_native_frame(state, tab_id, &png, &url);
+    }
+}
+
+pub fn native_close(tab_id: crate::TabId) {
+    let Ok(mut guard) = native_bridge() else {
+        return;
+    };
+    let Some(bridge) = guard.as_mut() else {
+        return;
+    };
+    if let Some(tab) = bridge.tabs.remove(&tab_id.0) {
+        let _ = bridge.server.client.command(
+            "Target.closeTarget",
+            json!({"targetId": tab.target}),
+            None,
+        );
+    }
+}
+
+pub fn native_handle(state: &Rc<RefCell<AppState>>, tab_id: crate::TabId, message: &Value) {
+    let kind = message.get("type").and_then(Value::as_str).unwrap_or("");
+    match kind {
+        "obscura.surface.ready" => native_activate(state, tab_id),
+        "obscura.surface.reload" => native_reload(state, tab_id),
+        "obscura.surface.click" => {
+            let x = message.get("x").and_then(Value::as_f64).unwrap_or(0.0);
+            let y = message.get("y").and_then(Value::as_f64).unwrap_or(0.0);
+            let mut guard = match native_bridge() {
+                Ok(guard) => guard,
+                Err(_) => return,
+            };
+            let Some(bridge) = guard.as_mut() else {
+                return;
+            };
+            let Some(tab) = bridge.tabs.get(&tab_id.0) else {
+                return;
+            };
+            let session = tab.session.clone();
+            let _ = bridge.server.client.mouse(&session, x, y);
+            std::thread::sleep(Duration::from_millis(250));
+            let png = bridge.server.client.screenshot(&session).ok();
+            drop(guard);
+            if let Some(png) = png {
+                send_native_frame(state, tab_id, &png, "click");
+            }
+        }
+        "obscura.surface.key" => {
+            let key = message.get("key").and_then(Value::as_str).unwrap_or("");
+            let mut guard = match native_bridge() {
+                Ok(guard) => guard,
+                Err(_) => return,
+            };
+            let Some(bridge) = guard.as_mut() else {
+                return;
+            };
+            let Some(tab) = bridge.tabs.get(&tab_id.0) else {
+                return;
+            };
+            let session = tab.session.clone();
+            for kind in ["keyDown", "keyUp"] {
+                let _ = bridge.server.client.command(
+                    "Input.dispatchKeyEvent",
+                    json!({"type": kind, "key": key, "text": key}),
+                    Some(&session),
+                );
+            }
+            std::thread::sleep(Duration::from_millis(200));
+            let png = bridge.server.client.screenshot(&session).ok();
+            drop(guard);
+            if let Some(png) = png {
+                send_native_frame(state, tab_id, &png, "key");
+            }
+        }
+        _ => {}
+    }
+}
+
+fn send_native_frame(state: &Rc<RefCell<AppState>>, tab_id: crate::TabId, png: &[u8], url: &str) {
+    use base64::Engine;
+    let screenshot = format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(png)
+    );
+    let payload = json!({
+        "screenshot": screenshot,
+        "url": url,
+        "status": "Obscura",
+    });
+    let script = format!(
+        "window.rustleObscuraSurface && window.rustleObscuraSurface.update({});",
+        serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_owned())
+    );
+    if let Some(webview) = state
+        .borrow()
+        .tab(tab_id)
+        .and_then(|tab| tab.webview.as_ref())
+    {
+        let _ = webview.evaluate_script(&script);
+    }
+}
+
+fn send_native_error(state: &Rc<RefCell<AppState>>, tab_id: crate::TabId, error: &str) {
+    let script = format!(
+        "window.rustleObscuraSurface && window.rustleObscuraSurface.update({});",
+        serde_json::to_string(&json!({"error": error, "status": error}))
+            .unwrap_or_else(|_| "{}".to_owned())
+    );
+    if let Some(webview) = state
+        .borrow()
+        .tab(tab_id)
+        .and_then(|tab| tab.webview.as_ref())
+    {
+        let _ = webview.evaluate_script(&script);
+    }
 }
