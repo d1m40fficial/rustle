@@ -131,13 +131,14 @@
 
 - Servo запускается с --layout-threads (половина доступных ядер, 1–8);
 - каждая Servo-вкладка — отдельный процесс;
-- бюджет одновременных Servo-процессов: 6, неактивные выгружаются по LRU;
+- бюджет одновременных Servo-процессов: 3, байтовый budget 650 МБ, неактивные выгружаются по LRU;
 - выгруженная вкладка восстанавливается при активации;
-- benchmark: scripts/bench-servo-tabs.ps1 считает startup, RSS Rustle и Servo.
+- benchmark: scripts/bench-servo-tabs.ps1 считает startup, RSS Rustle и Servo;
+- замеры: 10 вкладок — 580 МБ Servo, 30 вкладок — 660 МБ, Rustle 30–31 МБ.
 
 Ограничения:
 
 - это процессный параллелизм, а не управляемый work-stealing внутри Servo;
 - память ограничена количеством процессов, не байтовым budget;
-- нет замеров p50/p95 на 30/50 вкладках;
+- нет p95 input latency и top-1000 parity;
 - WebRender scene/raster и decode вне UI-потока ещё не настраиваются из Rustle.

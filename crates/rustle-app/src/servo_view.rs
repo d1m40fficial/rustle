@@ -40,6 +40,24 @@ unsafe extern "system" {
     fn SetWindowPos(hwnd: isize, after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32)
     -> i32;
     fn ShowWindow(hwnd: isize, command: i32) -> i32;
+    fn OpenProcess(access: u32, inherit: i32, pid: u32) -> isize;
+    fn CloseHandle(handle: isize) -> i32;
+    fn GetProcessMemoryInfo(handle: isize, counters: *mut ProcessMemoryCounters, cb: u32) -> i32;
+}
+
+#[repr(C)]
+#[allow(non_snake_case)]
+struct ProcessMemoryCounters {
+    cb: u32,
+    PageFaultCount: u32,
+    PeakWorkingSetSize: usize,
+    WorkingSetSize: usize,
+    QuotaPeakPagedPoolUsage: usize,
+    QuotaPagedPoolUsage: usize,
+    QuotaPeakNonPagedPoolUsage: usize,
+    QuotaNonPagedPoolUsage: usize,
+    PagefileUsage: usize,
+    PeakPagefileUsage: usize,
 }
 
 const GWL_STYLE: i32 = -16;
@@ -169,6 +187,7 @@ pub fn ensure(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: &str, visible: 
     }
     let active = state.borrow().active;
     trim_inactive(windows, active);
+    enforce_budget(windows, active, 650.0);
 }
 
 pub fn navigate(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: &str, visible: bool) {
@@ -243,8 +262,47 @@ pub fn layout(state: &Rc<RefCell<AppState>>) {
     }
 }
 
+fn enforce_budget(windows: &mut HashMap<TabId, ServoWindow>, active: TabId, max_mb: f64) {
+    let mut total: f64 = windows
+        .values()
+        .map(|window| process_mb(window.child.id()))
+        .sum();
+    while total > max_mb {
+        let candidate = windows
+            .iter()
+            .filter(|(id, window)| **id != active && !window.visible)
+            .min_by_key(|(_, window)| window.last_active)
+            .map(|(id, _)| *id);
+        let Some(id) = candidate else {
+            break;
+        };
+        if let Some(mut window) = windows.remove(&id) {
+            total -= process_mb(window.child.id());
+            close_window(&mut window);
+        }
+    }
+}
+
+fn process_mb(pid: u32) -> f64 {
+    unsafe {
+        let handle = OpenProcess(0x1000 | 0x10, 0, pid);
+        if handle == 0 {
+            return 0.0;
+        }
+        let mut counters: ProcessMemoryCounters = std::mem::zeroed();
+        counters.cb = std::mem::size_of::<ProcessMemoryCounters>() as u32;
+        let ok = GetProcessMemoryInfo(handle, &mut counters, counters.cb);
+        let _ = CloseHandle(handle);
+        if ok == 0 {
+            0.0
+        } else {
+            counters.WorkingSetSize as f64 / (1024.0 * 1024.0)
+        }
+    }
+}
+
 fn trim_inactive(windows: &mut HashMap<TabId, ServoWindow>, active: TabId) {
-    const MAX_SERVO_TABS: usize = 6;
+    const MAX_SERVO_TABS: usize = 3;
     while windows.len() > MAX_SERVO_TABS {
         let candidate = windows
             .iter()
