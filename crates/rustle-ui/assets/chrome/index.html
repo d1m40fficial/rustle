@@ -28,7 +28,10 @@
     <button class="chrome-btn topbar-menu" type="button" id="topbar-menu" title="Настройки" aria-label="Настройки">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
     </button>
-    <button class="chrome-btn" type="button" id="back" data-cmd="nav.back" title="Назад (Alt+←)" aria-label="Назад" disabled>
+    <button class="chrome-btn" type="button" id="toolbar-home" title="На главную" aria-label="На главную">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 11 8-6.5 8 6.5" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.5 10.5V20h11v-9.5" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linejoin="round"/><path d="M10 20v-5h4v5" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linejoin="round"/></svg>
+    </button>
+  <button class="chrome-btn" type="button" id="back" data-cmd="nav.back" title="Назад (Alt+←)" aria-label="Назад" disabled>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <button class="chrome-btn" type="button" id="forward" data-cmd="nav.forward" title="Вперёд (Alt+→)" aria-label="Вперёд" disabled>
@@ -38,10 +41,7 @@
       <svg class="icon-reload" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round"/><path d="M20 4v7h-7" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <svg class="icon-spinner" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.65" opacity="0.25"/><path d="M20 12a8 8 0 0 0-8-8" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round"/></svg>
     </button>
-    <button class="chrome-btn" type="button" id="toolbar-home" title="На главную" aria-label="На главную">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 11 8-6.5 8 6.5" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.5 10.5V20h11v-9.5" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linejoin="round"/><path d="M10 20v-5h4v5" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linejoin="round"/></svg>
-    </button>
-
+  
     <div class="address">
       <span class="address__search" aria-hidden="true">
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m16 16 4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>

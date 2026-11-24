@@ -32,6 +32,7 @@ unsafe extern "system" {
     fn GetWindowThreadProcessId(hwnd: isize, pid: *mut u32) -> u32;
     fn IsWindowVisible(hwnd: isize) -> i32;
     fn GetWindowTextLengthW(hwnd: isize) -> i32;
+    fn GetWindowTextW(hwnd: isize, text: *mut u16, max: i32) -> i32;
     fn SetParent(hwnd: isize, parent: isize) -> isize;
     fn GetWindowLongPtrW(hwnd: isize, index: i32) -> isize;
     fn SetWindowLongPtrW(hwnd: isize, index: i32, value: isize) -> isize;
@@ -154,6 +155,11 @@ pub fn ensure(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: &str, visible: 
             visible,
         },
     );
+    if let Some(title) = window_title(hwnd) {
+        if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+            tab.title = title;
+        }
+    }
 }
 
 pub fn navigate(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: &str, visible: bool) {
@@ -287,4 +293,31 @@ fn find_window(pid: u32) -> isize {
         );
     }
     search.hwnd
+}
+
+pub fn title(tab_id: TabId) -> Option<String> {
+    let guard = WINDOWS.lock().ok()?;
+    let windows = guard.as_ref()?;
+    windows
+        .get(&tab_id)
+        .and_then(|window| window_title(window.hwnd))
+}
+
+fn window_title(hwnd: isize) -> Option<String> {
+    let mut buffer = [0u16; 512];
+    let length = unsafe { GetWindowTextW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32) };
+    if length <= 0 {
+        return None;
+    }
+    let title = String::from_utf16_lossy(&buffer[..length as usize])
+        .trim()
+        .to_owned();
+    if title.is_empty()
+        || title.eq_ignore_ascii_case("servo")
+        || title.eq_ignore_ascii_case("servoshell")
+    {
+        None
+    } else {
+        Some(title)
+    }
 }

@@ -2030,8 +2030,6 @@ body.topbar-compact .toolbar { display: contents; }
 body.topbar-compact .topbar-menu { display: inline-flex; }
 body.topbar-compact #toolbar-home { display: inline-flex; }
 body.topbar-compact #profile-avatar,
-body.topbar-compact #back,
-body.topbar-compact #forward,
 body.topbar-compact #reload,
 body.topbar-compact .zoom-label,
 body.topbar-compact #translate-page,
@@ -2611,7 +2609,7 @@ html.settings-rail-open .internal-page { padding-left: 252px; }
   background: var(--text);
 }
 
-body.topbar-compact.obscura-engine #back,
-body.topbar-compact.obscura-engine #forward {
+body.topbar-compact #back,
+body.topbar-compact #forward {
   display: inline-flex;
 }

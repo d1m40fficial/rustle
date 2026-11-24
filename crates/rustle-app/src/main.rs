@@ -268,6 +268,8 @@ struct Tab {
     muted: bool,
     container: Option<String>,
     engine: String,
+    servo_history: Vec<String>,
+    servo_history_index: usize,
     blocked: u64,
     cosmetic_generic: bool,
     cosmetic_exceptions: HashSet<String>,
@@ -305,6 +307,8 @@ impl Tab {
             muted: false,
             container: None,
             engine: "webview2".to_owned(),
+            servo_history: Vec::new(),
+            servo_history_index: 0,
             blocked: 0,
             cosmetic_generic: true,
             cosmetic_exceptions: HashSet::new(),
@@ -2120,8 +2124,15 @@ fn ensure_tab_webview(state: &Rc<RefCell<AppState>>, tab_id: TabId) {
         {
             let visible = tab.id == state_ref.active;
             let url = tab.url.clone();
+            let has_history = !tab.servo_history.is_empty();
             drop(state_ref);
             servo_view::ensure(state, tab_id, &url, visible);
+            if !has_history {
+                if let Some(tab) = state.borrow_mut().tab_mut(tab_id) {
+                    tab.servo_history = vec![url.clone()];
+                    tab.servo_history_index = 0;
+                }
+            }
             return;
         }
     }
@@ -2353,6 +2364,11 @@ fn navigate_active(state: &Rc<RefCell<AppState>>, input: &str) {
             tab.title = fallback_title(&url);
             tab.loading = false;
             tab.error = None;
+            tab.servo_history.truncate(tab.servo_history_index + 1);
+            tab.servo_history.push(url.clone());
+            tab.servo_history_index = tab.servo_history.len() - 1;
+            tab.can_back = tab.servo_history_index > 0;
+            tab.can_forward = false;
         }
         servo_view::navigate(state, active, &url, true);
         push_ui_state(state);
@@ -2519,6 +2535,33 @@ fn go_back_active(state: &Rc<RefCell<AppState>>) {
     if state
         .borrow()
         .tab(active)
+        .is_some_and(|tab| tab.engine == "servo")
+    {
+        let target = {
+            let mut state_ref = state.borrow_mut();
+            let Some(tab) = state_ref.tab_mut(active) else {
+                return;
+            };
+            if tab.servo_history_index == 0 {
+                return;
+            }
+            tab.servo_history_index -= 1;
+            tab.can_back = tab.servo_history_index > 0;
+            tab.can_forward = true;
+            tab.servo_history.get(tab.servo_history_index).cloned()
+        };
+        if let Some(url) = target {
+            servo_view::navigate(state, active, &url, true);
+            if let Some(tab) = state.borrow_mut().tab_mut(active) {
+                tab.url = url;
+            }
+            push_ui_state(state);
+        }
+        return;
+    }
+    if state
+        .borrow()
+        .tab(active)
         .is_some_and(|tab| tab.engine == "obscura")
     {
         obscura_view::native_back(state, active);
@@ -2597,6 +2640,33 @@ fn go_back_active(state: &Rc<RefCell<AppState>>) {
 
 fn go_forward_active(state: &Rc<RefCell<AppState>>) {
     let active = state.borrow().active;
+    if state
+        .borrow()
+        .tab(active)
+        .is_some_and(|tab| tab.engine == "servo")
+    {
+        let target = {
+            let mut state_ref = state.borrow_mut();
+            let Some(tab) = state_ref.tab_mut(active) else {
+                return;
+            };
+            if tab.servo_history_index + 1 >= tab.servo_history.len() {
+                return;
+            }
+            tab.servo_history_index += 1;
+            tab.can_back = true;
+            tab.can_forward = tab.servo_history_index + 1 < tab.servo_history.len();
+            tab.servo_history.get(tab.servo_history_index).cloned()
+        };
+        if let Some(url) = target {
+            servo_view::navigate(state, active, &url, true);
+            if let Some(tab) = state.borrow_mut().tab_mut(active) {
+                tab.url = url;
+            }
+            push_ui_state(state);
+        }
+        return;
+    }
     if state
         .borrow()
         .tab(active)
@@ -2893,6 +2963,7 @@ fn activate_tab(state: &Rc<RefCell<AppState>>, id: TabId) {
     let previous = state.borrow().active;
     if previous == id {
         ensure_tab_webview(state, id);
+        servo_view::set_visible(id, true);
         if state
             .borrow()
             .tab(id)
@@ -2924,6 +2995,12 @@ fn activate_tab(state: &Rc<RefCell<AppState>>, id: TabId) {
         }
     }
     ensure_tab_webview(state, id);
+    servo_view::set_visible(id, true);
+    if let Some(title) = servo_view::title(id) {
+        if let Some(tab) = state.borrow_mut().tab_mut(id) {
+            tab.title = title;
+        }
+    }
     if state
         .borrow()
         .tab(id)
