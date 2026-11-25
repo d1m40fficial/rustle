@@ -7453,7 +7453,6 @@ fn refresh_resize_passthrough(state: &Rc<RefCell<AppState>>) {
 
 fn enable_frameless_resize(window: &Window) {
     const GWL_STYLE: i32 = -16;
-    const WS_THICKFRAME: isize = 0x0004_0000;
     const WS_MINIMIZEBOX: isize = 0x0002_0000;
     const WS_MAXIMIZEBOX: isize = 0x0001_0000;
     const WS_CAPTION: isize = 0x00C0_0000;
@@ -7469,7 +7468,7 @@ fn enable_frameless_resize(window: &Window) {
         SetWindowLongPtrW(
             hwnd,
             GWL_STYLE,
-            (style & !(WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)) | WS_THICKFRAME,
+            style & !(WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | 0x0004_0000),
         );
         SetWindowPos(
             hwnd,
@@ -7676,7 +7675,7 @@ fn main() -> wry::Result<()> {
     #[cfg(target_os = "windows")]
     {
         let border_color = 34u32;
-        let none_color = 0xFFFF_FFFEu32;
+        let none_color = 0x001E_1E1Eu32;
         let round = 2u32;
         unsafe {
             let _ = DwmSetWindowAttribute(window.hwnd(), border_color, &none_color, 4);
@@ -7819,6 +7818,8 @@ fn main() -> wry::Result<()> {
     if state.borrow().vertical {
         create_sidebar(&state)?;
     }
+    #[cfg(target_os = "windows")]
+    install_resize_overlays(state.borrow().window.hwnd());
     mark("chrome");
     refresh_saved_sessions(&state);
     {
@@ -7932,6 +7933,7 @@ fn main() -> wry::Result<()> {
             Event::UserEvent(AppEvent::ContentIpc(tab_id, body)) => {
                 if let Ok(message) = serde_json::from_str::<Value>(&body) {
                     match message.get("type").and_then(Value::as_str) {
+                        Some("settings.save") => handle_ipc(&state, &body),
                         Some(kind) if kind.starts_with("obscura.") => {
                             obscura_view::handle(tab_id, &message, &state);
                         }

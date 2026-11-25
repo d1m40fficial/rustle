@@ -2517,45 +2517,6 @@
       });
     }
 
-    const engineSelect = byId("setting-engine");
-    if (engineSelect) {
-      engineSelect.addEventListener("change", () => {
-        send({ type: "settings.save", searchEngine: engineSelect.value });
-      });
-    }
-
-    const themeSelect = byId("setting-theme");
-    if (themeSelect) {
-      themeSelect.addEventListener("change", () => {
-        send({ type: "settings.save", theme: themeSelect.value });
-      });
-    }
-    const languageSelect = byId("setting-language");
-    if (languageSelect) {
-      languageSelect.addEventListener("change", () => {
-        send({ type: "settings.save", language: languageSelect.value });
-      });
-    }
-
-    const topbarStyleSelect = byId("setting-topbar-style");
-    if (topbarStyleSelect) {
-      topbarStyleSelect.addEventListener("change", () => {
-        send({ type: "settings.save", topbarStyle: topbarStyleSelect.value });
-      });
-    }
-    const windowControlsSelect = byId("setting-window-controls");
-    if (windowControlsSelect) {
-      windowControlsSelect.addEventListener("change", () => {
-        send({ type: "settings.save", windowControls: windowControlsSelect.value });
-      });
-    }
-    const engineBackendSelect = byId("setting-engine-backend");
-    if (engineBackendSelect) {
-      engineBackendSelect.addEventListener("change", () => {
-        send({ type: "settings.save", engine: engineBackendSelect.value });
-      });
-    }
-
     const settingsForm = byId("settings-form");
     if (settingsForm) {
       let settingsSaveTimer = 0;
