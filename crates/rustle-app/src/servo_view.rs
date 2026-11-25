@@ -150,6 +150,9 @@ pub fn ensure(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: &str, visible: 
         return;
     }
     unsafe {
+        ShowWindow(hwnd, SW_HIDE);
+    }
+    unsafe {
         let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
         let _ = SetWindowLongPtrW(
             hwnd,
@@ -187,7 +190,7 @@ pub fn ensure(state: &Rc<RefCell<AppState>>, tab_id: TabId, url: &str, visible: 
     }
     let active = state.borrow().active;
     trim_inactive(windows, active);
-    enforce_budget(windows, active, 650.0);
+    enforce_budget(windows, active, 1600.0);
 }
 
 pub fn available() -> bool {
@@ -320,7 +323,7 @@ fn process_mb(pid: u32) -> f64 {
 }
 
 fn trim_inactive(windows: &mut HashMap<TabId, ServoWindow>, active: TabId) {
-    const MAX_SERVO_TABS: usize = 3;
+    const MAX_SERVO_TABS: usize = 8;
     while windows.len() > MAX_SERVO_TABS {
         let candidate = windows
             .iter()

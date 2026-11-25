@@ -2591,8 +2591,14 @@
               .split(/[,\n]+/)
               .map((entry) => entry.trim())
               .filter(Boolean),
+            engine: byId("setting-engine-backend")?.value || "webview2",
+            topbarStyle: byId("setting-topbar-style")?.value || "compact",
+            windowControls: byId("setting-window-controls")?.value || "standard",
+            particlesEnabled: byId("setting-particles")?.checked ?? true,
+            particleIntensity: Number(byId("setting-particle-intensity")?.value || 100),
         });
-        byId("settings-status").textContent = "Сохранено";
+        const status = byId("settings-status");
+        if (status) status.textContent = "Сохранено";
       });
     }
 

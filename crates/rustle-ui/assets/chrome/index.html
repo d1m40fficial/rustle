@@ -108,12 +108,12 @@
         <div class="newtab__brand">Rustle</div>
         <canvas class="newtab__particles" id="newtab-particles"></canvas>
       </div>
-      <p class="newtab__tagline">Минималистичный браузер. 0.42.0.</p>
+      <p class="newtab__tagline">Минималистичный браузер. 1.0.0.</p>
 
       <form class="newtab__search" id="newtab-search" role="search">
         <input class="newtab__input" id="newtab-query" type="text" placeholder="Поиск или адрес" autocomplete="off">
         <button class="newtab__go" type="submit" aria-label="Найти">→</button>
-      </form>
+</form>
 
       <div class="newtab__shortcuts" id="newtab-shortcuts"></div>
       <div class="newtab__actions">
@@ -256,7 +256,7 @@
       <label class="settings__row">
         <span>
           <strong>Движок новых вкладок</strong>
-          <small>WebView2 или экспериментальный Obscura CDP.</small>
+          <small>WebView2 по умолчанию, Obscura CDP или Servo.</small>
         </span>
         <select id="setting-engine-backend">
           <option value="webview2">WebView2</option>
@@ -340,6 +340,9 @@
           <input id="profile-new-pin" type="password" inputmode="numeric" maxlength="4" placeholder="PIN (необязательно)" autocomplete="off">
           <button class="button" id="profile-create" type="button">Создать профиль</button>
         </div>
+      </div>
+      <div class="settings__actions">
+        <button class="button button--primary" id="settings-apply" type="submit">Применить настройки</button>
       </div>
       <button type="submit" hidden aria-hidden="true"></button>
     </form>

@@ -7584,7 +7584,11 @@ fn install_crash_logger() {
     std::panic::set_hook(Box::new(|info| {
         let path = rustle_storage::data_dir().join("crashes.log");
         let _ = std::fs::create_dir_all(rustle_storage::data_dir());
-        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
             let _ = writeln!(
                 file,
                 "{} panic: {} at {}:{}",
@@ -7593,7 +7597,9 @@ fn install_crash_logger() {
                     .map(|value| value.as_secs())
                     .unwrap_or(0),
                 info,
-                info.location().map(|location| location.file()).unwrap_or("?"),
+                info.location()
+                    .map(|location| location.file())
+                    .unwrap_or("?"),
                 info.location().map(|location| location.line()).unwrap_or(0),
             );
         }
